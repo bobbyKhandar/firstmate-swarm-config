@@ -2,7 +2,7 @@
 
 A reusable settings preset for [Firstmate](https://github.com/kunchenguid/firstmate), using Herdr as the workspace and native coding CLIs as workers.
 
-**High reasoning plans → a medium-reasoning manager assigns tasks → low-reasoning workers implement → the manager code reviews → workers fix findings → the manager re-reviews and accepts.**
+**High reasoning plans → a medium-reasoning manager assigns tasks → GPT-6 Luna extra-high workers implement → the manager code reviews → workers fix findings → the manager re-reviews and accepts.**
 
 This repository contains configuration and small launch helpers. Firstmate itself is downloaded separately from upstream and lives in an ignored `home/` directory. It is not vendored here.
 
@@ -22,7 +22,7 @@ flowchart TD
     P -- Clear existing plan --> A
 
     A["Manager assigns bounded tasks<br/>Chooses worker count and models"]
-    A --> W["Low-reasoning workers<br/>Isolated task branches<br/>Implement, commit, run checks"]
+    A --> W["GPT-6 Luna workers, extra-high reasoning<br/>Isolated task branches<br/>Implement, commit, run checks"]
 
     W --> R["Manager personally reviews<br/>Actual diff + test evidence"]
     R --> Q{"Meets requirements?"}
@@ -53,10 +53,10 @@ The graph shows final publication. A project's validation workflow may require a
 | --- | --- | --- |
 | Planner | Codex `gpt-6.1-sol` high; Claude `sonnet` high alternative | Resolve architecture and uncertainty; return a bounded plan. |
 | Manager | Codex `gpt-6.1-sol` medium | Assign tasks, supervise workers, personally review actual diffs and verification, request fixes, and accept the result. |
-| Workers | Codex `gpt-6-luna` low; Claude `haiku` low | Implement small, clear tasks and run relevant checks. |
+| Workers | Codex `gpt-6-luna`, **extra-high** (`xhigh`) | Implement small, clear tasks and run relevant checks. |
 | Extra review or escalation | Claude `sonnet` medium; Codex `gpt-6-luna` medium | Assist when needed; manager acceptance review still applies. |
 
-Model identifiers are a snapshot of the original setup, not a guarantee of availability for your account. Edit `settings/config/crew-dispatch.json` and the manager model in `swarm` for models your CLI supports; keep `settings/captain.md` and `manager-start.md` consistent with those choices. Reasoning effort and model cost are separate choices.
+Model identifiers are a snapshot of the original setup, not a guarantee of availability for your account. Edit `settings/config/crew-dispatch.json` and the manager model in `swarm` for models your CLI supports; keep `settings/captain.md` and `manager-start.md` consistent with those choices. Reasoning effort and model cost are separate choices. The execution default is GPT-6 Luna xhigh for routine work too; quota pressure must not silently change the model or effort. This preset does not make a pricing or quota guarantee.
 
 - No fixed worker-count cap: the planner recommends the task split; the manager chooses concurrency based on dependencies, conflicting edits, current quota, machine resources, and supervision/review capacity. Planning and extra review workers count toward this assessment. The manager records the rationale in the task plan and adjusts concurrency as work changes.
 - One manager; no nested swarms or native Codex subagents.
@@ -109,13 +109,13 @@ The launcher opens the persistent Herdr session `firstmate-tiered` and starts on
 
 ### Optional OpenCode route
 
-OpenCode is excluded from automatic routing until its official browser login and a native low-variant probe succeed:
+OpenCode is excluded from automatic routing until its official browser login and a native GPT-6 Luna xhigh probe succeed:
 
 ```sh
 ./swarm --connect-opencode
 ```
 
-This uses the local OpenCode credential store. It does not copy credentials from Codex. The helper considers only its listed model candidates and leaves routing disabled if none passes. Account access and shared allowance still apply. After successful verification it updates the active `home/config/crew-dispatch.json`, not the committed template.
+This uses the local OpenCode credential store. It does not copy credentials from Codex. The helper considers only the exact `openai/gpt-6-luna` model at `xhigh` effort and leaves routing disabled if none passes. Account access and shared allowance still apply. After successful verification it updates the active `home/config/crew-dispatch.json`, not the committed template.
 
 Cursor is excluded from automatic routing by default. Add a route only after verifying account access to a named model and the requested reasoning tier. Auto does not provide a pinned reasoning tier.
 

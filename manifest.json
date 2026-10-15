@@ -5,19 +5,19 @@
   "files": {
     ".gitignore": "76d05f2adfddc68f9a3a9317bcc51f9406ef52f0f5c77d3734102d19eb1f126d",
     "LICENSE": "ce9ddd9e32b477bc36acf51dc71bb3ba6e09b13e9b102d190e10945420b5223b",
-    "README.md": "d67ad49cabc185cfe015e324bf331bc0a7eeab333db8a19d862d980c7bfe07a4",
-    "bin/enable-opencode.py": "98db4096c39f5157719d40e34d3025494820c8bf8f0018819cc52a3d043c63ae",
+    "README.md": "e89ac522e474e7adc345027990f0422b883f12a967b4e371d87cf14d19e7788a",
+    "bin/enable-opencode.py": "536dfa04f21656f6846eb1c15346e1ddf69d8a687282524603bd86b35ad43c0e",
     "bin/herdr-shell": "68c8ed7bebce727fab13a33b4e854576cd63a478410c60f7bf1ebd384ffce47c",
-    "manager-start.md": "e36503f977377fa56f0d4f71a9bc4df55faf7c0ba802ff6f37d01a40e0be8d7d",
-    "settings/captain.md": "c6e0ba06ba94f9a5476da0d6739e10543b39173a2d9cfab02d20e3e956d84e49",
+    "manager-start.md": "07bb8185891e7c0902f693140e3d5b0dcbe577adcec77f060d90c47c6a20725a",
+    "settings/captain.md": "16f4eeb8a0f0ff64c52eda21850eacb96e5008a02a73b8ea40f3aa6d7e5c095b",
     "settings/config/backend": "cf8f09d5c26f8f2acdac8f6fc837505fcbdaf12d1ea7f34c08a58c07eb5bc564",
-    "settings/config/brief-include.md": "30a9a5c8d3ea99646b0377eeeffc4fd0ac3180ad78d1ff27da75f04f7a1a307f",
+    "settings/config/brief-include.md": "7568a1d28f38dd7eddde497174592a0ea2dac347c012b5d312fe03727c6827bb",
     "settings/config/claude-permission-mode": "6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5",
-    "settings/config/crew-dispatch.json": "5409f6b036e7042ff9dceeb73a5fba8a77078300ef1b558d03102a0a0f472be3",
+    "settings/config/crew-dispatch.json": "03342048d6e0b74c5186afe11aa87d603b9e2d22240f04a976debfa4a7cdc7bd",
     "settings/config/crew-harness": "243b0dc9b847e66c440dca985e10fe0ce9e29c379b018ddd5747ba8948f84cc8",
     "settings/config/secondmate-harness": "a8b4fae3a7cb9cdee928528f04f5b4935be68f1e6131f3116eef20106087109d",
     "settings/config/startup-memory-budget": "0d5f5787265adcabadcbe5607a8f7c8d13c872e066e8b127e7d699437caeecf7",
     "settings/config/supervision-host-off": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
-    "swarm": "30758497e9555b7c3f36aabeedeb31a79fb9706f92148681bd0c77e88ff62104"
+    "swarm": "fda218d9565050aea1f4f0c1889e7cc85c052e82d5497fac2eaf56ee6ac6964c"
   }
 }

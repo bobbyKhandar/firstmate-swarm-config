@@ -18,10 +18,10 @@ dispatch = json.loads((home / 'config/crew-dispatch.json').read_text())
 for profile in [dispatch['default'], *(rule['use'] for rule in dispatch['rules'])]:
     for candidate in profile if isinstance(profile, list) else [profile]:
         assert candidate['harness'] in {'codex', 'claude', 'cursor', 'opencode'}
-        assert candidate.get('effort', 'low') in {'low', 'medium', 'high'}
+        assert candidate.get('effort', 'low') in {'low', 'medium', 'high', 'xhigh'}
 assert (home / 'config/backend').read_text().strip() == 'herdr'
 assert (home / 'data/captain.md').is_file()
-print('Configuration valid: high planning, medium management, low execution.')
+print('Configuration valid: high planning, medium management, GPT-6 Luna xhigh execution.')
 PY
 }
 

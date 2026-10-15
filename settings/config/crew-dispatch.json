@@ -20,36 +20,26 @@
       "when": "The task is narrow read-only reconnaissance, file gathering, a mechanical edit, formatting, a targeted rename, or another straightforward operation with clear acceptance criteria.",
       "use": [
         {
-          "harness": "claude",
-          "model": "haiku",
-          "effort": "low"
-        },
-        {
           "harness": "codex",
           "model": "gpt-6-luna",
-          "effort": "low"
+          "effort": "xhigh"
         }
       ],
-      "why": "Keep the highest-volume routine work on explicit low-reasoning profiles whose live account probes passed."
+      "why": "Use the requested GPT-6 Luna worker at extra-high reasoning for routine work too. Do not silently substitute a low-effort or different-model worker."
     },
     {
-      "when": "The task is scoped implementation or straightforward tests from a sufficiently clear accepted plan, without unresolved architecture or a previous inadequate low-tier attempt.",
+      "when": "The task is scoped implementation or straightforward tests from a sufficiently clear accepted plan, without unresolved architecture. Execution workers use the requested GPT-6 Luna extra-high profile.",
       "use": [
         {
           "harness": "codex",
           "model": "gpt-6-luna",
-          "effort": "low"
-        },
-        {
-          "harness": "claude",
-          "model": "haiku",
-          "effort": "low"
+          "effort": "xhigh"
         }
       ],
-      "why": "Execution starts at low reasoning after planning has removed ambiguity. Choose among subscriptions using current quota evidence."
+      "why": "Implementation uses GPT-6 Luna with explicit xhigh reasoning after planning has removed architectural ambiguity."
     },
     {
-      "when": "The task is an additional independent review explicitly requested or justified by the change, ambiguous debugging, or implementation that the manager has explicitly escalated after a low-tier attempt was inadequate. Routine acceptance code review is performed by the medium-reasoning manager itself and is not a worker assignment. Unresolved architectural planning decisions belong to the planning rule.",
+      "when": "The task is an additional independent review explicitly requested or justified by the change, ambiguous debugging, or implementation that the manager has explicitly escalated after the execution worker attempt was inadequate. Routine acceptance code review is performed by the medium-reasoning manager itself and is not a worker assignment. Unresolved architectural planning decisions belong to the planning rule.",
       "use": [
         {
           "harness": "claude",
@@ -69,12 +59,7 @@
     {
       "harness": "codex",
       "model": "gpt-6-luna",
-      "effort": "low"
-    },
-    {
-      "harness": "claude",
-      "model": "haiku",
-      "effort": "low"
+      "effort": "xhigh"
     }
   ]
 }
