@@ -17,13 +17,13 @@ This repository contains configuration and small launch helpers. Firstmate itsel
 
 Model identifiers are a snapshot of the original setup, not a guarantee of availability for your account. Edit `settings/config/crew-dispatch.json` and the manager model in `swarm` for models your CLI supports; keep `settings/captain.md` and `manager-start.md` consistent with those choices. Reasoning effort and model cost are separate choices.
 
-- At most two active workers, including planning and extra review workers.
+- No fixed worker-count cap: the planner recommends the task split; the manager chooses concurrency based on dependencies, conflicting edits, current quota, machine resources, and supervision/review capacity. Planning and extra review workers count toward this assessment. The manager records the rationale in the task plan and adjusts concurrency as work changes.
 - One manager; no nested swarms or native Codex subagents.
 - Worker reports must identify the changes and checks actually run.
 - The manager reads the actual diff, returns actionable findings to the worker, and reviews the updated changes before acceptance.
 - Project validation and user authority over merging continue to apply.
 
-The worker limit and acceptance loop are standing agent instructions, not hard-coded enforcement. A full project assignment-to-acceptance cycle has not yet been exercised.
+Concurrency choices and the acceptance loop are standing agent instructions, not hard-coded enforcement. A full project assignment-to-acceptance cycle has not yet been exercised.
 
 ## Requirements
 
