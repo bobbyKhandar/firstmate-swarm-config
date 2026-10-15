@@ -24,6 +24,20 @@ The manager owns acceptance of every implementation task. The user explicitly wa
 
 An additional independent reviewer may assist when justified by the change or explicitly requested, within the manager's chosen concurrency. It does not replace the manager's own acceptance review. Preserve the generated worker status protocol, required validation, and existing delivery and merge boundaries; do not invent status events or bypass lifecycle scripts.
 
+## Branches and GitHub publication
+
+For user-requested implementation in an identified GitHub-backed project, routine creation of task branches, task commits, and ordinary pushes of those task branches to the project's configured remote are authorized without another permission question. Use the project's branch naming rules and isolated task copy. Explicit local-only instructions or narrower task restrictions still win. This does not authorize creating repositories, changing visibility or remotes, publishing unrelated work, or pushing to a protected or default branch.
+
+Workers may create their task branch, commit the scoped changes, and push as required by the selected delivery workflow. A pipeline-owned preliminary push or PR is not manager acceptance. Keep required validation and publication under the selected workflow; do not bypass an active pipeline or its approval decisions.
+
+The manager owns final GitHub delivery. After personally reviewing the final diff and completing the validation prerequisites for publication, ensure the exact reviewed revision is pushed to the task branch. Direct the owning worker when the selected pipeline owns the push; otherwise the manager may perform an ordinary final task-branch push itself. This is explicit narrow standing authority for task-branch creation and publication even where the general supervisor contract prohibits project state changes; it does not permit the manager to edit project code or commit worker changes itself. Preserve normal tool approval review and host-control requirements.
+
+Before a final push, confirm the project, configured remote, task branch, and reviewed HEAD. Any later code change requires review again. Use a normal non-forced push; if it is rejected or the remote has unexpected changes, reconcile through the owning worker and re-review rather than overwrite remote work. Never force-push, delete branches, rewrite published history, or push secrets under this permission.
+
+Verify the remote task branch contains the reviewed revision, retain the branch and commit or PR URL in the task record, and complete any required post-push checks before reporting delivery ready. If the branch is already current, verify it rather than manufacture another commit or push. A successful local commit alone is not GitHub delivery. Missing credentials or a rejected protected operation is a concrete blocker, not a reason to disable review.
+
+Merging or pushing directly into the default branch still requires the user's explicit authorization. This publication permission does not grant merge, release, deployment, visibility-change, or unlanded-work cleanup authority.
+
 ## Size and cost
 
 There is no fixed worker-count cap. The planner recommends task decomposition, dependencies, and useful parallel work; the manager chooses and adjusts active concurrency. Base the choice on independent ready tasks, overlapping files or components, current account quotas, machine resources, and the manager's capacity to supervise and personally review the results. Include planning and extra review workers in that assessment. Add workers when parallelism improves delivery; queue dependent or conflicting work and reduce concurrency when quota, resource, or review pressure makes it unhelpful. Briefly record the chosen concurrency and rationale in the task plan, and reassess as work changes. Keep one writer per isolated copy. Do not create secondmates or nested workers for this setup. This is an instruction policy, not an operating-system concurrency limiter.
@@ -38,4 +52,4 @@ Cursor is excluded from automatic tiered dispatch by default. Enable a pinned ro
 
 The optional OpenCode helper uses official ChatGPT OAuth. Keep OpenCode outside automatic dispatch until its official OAuth login and low-variant live probe pass. The companion enable command records success in state/opencode-verified.json and adds only a catalog-verified OpenAI low-tier profile to crew-dispatch.json. Inspect current credentials and quota evidence when dispatching; a second client does not create another subscription allowance. The current Firstmate adapter maps low/medium variants for OpenAI-backed OpenCode models; do not claim a low thinking setting for a provider that does not expose one.
 
-Only act on user-requested tasks. Project registration, outward publication, merging, cleanup of unlanded work, and other authority boundaries continue to follow the normal Firstmate contracts.
+Only act on user-requested tasks. The task-branch publication permission above applies only to requested work in the identified project. Project registration, other outward publication, merging, cleanup of unlanded work, and remaining authority boundaries continue to follow the normal Firstmate contracts.

@@ -25,6 +25,12 @@ Model identifiers are a snapshot of the original setup, not a guarantee of avail
 
 Concurrency choices and the acceptance loop are standing agent instructions, not hard-coded enforcement. A full project assignment-to-acceptance cycle has not yet been exercised.
 
+## Branches and publishing
+
+Task-branch creation, scoped commits, and normal pushes to the identified project's configured GitHub remote are authorized as part of requested implementation; the manager does not need to ask again for those routine steps. Explicit local-only tasks stay local. Workers follow the project's normal delivery workflow, including pipeline-owned pushes and PRs.
+
+The manager owns final publication after reviewing the code: it directs the owning worker when a pipeline owns the push, or performs an ordinary final task-branch push itself. It verifies the remote revision matches the reviewed code and required checks pass before reporting delivery ready. This permission does not authorize force pushes, branch deletion, remote/visibility changes, releases, deployments, or merging/pushing into the default branch. Default-branch delivery still requires explicit user authorization.
+
 ## Requirements
 
 This preset targets Linux with Bash, Git, Python 3 (`python`), `flock`, and `readlink -f`.
