@@ -6,6 +6,47 @@ A reusable settings preset for [Firstmate](https://github.com/kunchenguid/firstm
 
 This repository contains configuration and small launch helpers. Firstmate itself is downloaded separately from upstream and lives in an ignored `home/` directory. It is not vendored here.
 
+## Where the agents run
+
+Herdr provides the visible workspace. The manager is a Codex session following Firstmate's instructions; Firstmate launches and supervises the planner and worker sessions through their native CLIs. The same medium-reasoning manager coordinates assignments, personally reviews code, and owns final GitHub delivery.
+
+## Workflow
+
+```mermaid
+flowchart TD
+    U["You: project + desired outcome"] --> M["Manager understands the task"]
+    M --> P{"Needs planning?"}
+
+    P -- Yes --> H["High-reasoning planner<br/>Plan, dependencies, acceptance criteria"]
+    H --> A
+    P -- Clear existing plan --> A
+
+    A["Manager assigns bounded tasks<br/>Chooses worker count and models"]
+    A --> W["Low-reasoning workers<br/>Isolated task branches<br/>Implement, commit, run checks"]
+
+    W --> R["Manager personally reviews<br/>Actual diff + test evidence"]
+    R --> Q{"Meets requirements?"}
+    Q -- No --> F["Manager sends findings<br/>to the responsible worker"]
+    F --> W
+
+    Q -- Yes --> L{"Explicitly local-only?"}
+    L -- Yes --> LOCAL["Keep reviewed local branch<br/>Complete required local checks"]
+    L -- No --> G["Final GitHub publication<br/>Manager pushes or directs pipeline worker"]
+    G --> V["Verify reviewed revision is on GitHub<br/>Check required CI results"]
+    V --> C{"Checks pass?"}
+    C -- No --> F
+    C -- Yes --> D["Manager reports ready<br/>Summary, verification, branch or PR link"]
+    LOCAL --> D
+
+    D --> Y{"You approve merging?"}
+    Y -- Not yet --> WAIT["Keep branch or PR ready"]
+    Y -- Yes --> MERGE["Merge through project workflow"]
+```
+
+The planner recommends useful parallel work; the manager adjusts concurrency to dependencies, edit conflicts, quota, machine resources, and review capacity. There is no fixed worker cap. Any code change after review must be reviewed again before final acceptance.
+
+The graph shows final publication. A project's validation workflow may require an earlier worker push or PR; that preliminary publication is not manager acceptance. Explicit local-only tasks skip GitHub publication. Merge approval remains separate from task-branch push permission.
+
 ## What it configures
 
 | Role | Default profiles | Responsibility |
