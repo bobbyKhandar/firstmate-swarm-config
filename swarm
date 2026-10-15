@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SWARM_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd -P)
+export FM_HOME="$SWARM_DIR/home"
+export FM_SWARM_CODE_ROOT="${FM_SWARM_CODE_ROOT:-$FM_HOME}"
+
+check_setup() {
+  for executable in herdr codex claude cursor-agent opencode quota-axi treehouse tasks-axi flock python; do
+    command -v "$executable" >/dev/null || { printf 'Missing command: %s\n' "$executable" >&2; return 1; }
+  done
+  test -x "$FM_SWARM_CODE_ROOT/bin/fm-spawn.sh"
+  python - "$FM_HOME" <<'PY'
+import json, sys
+from pathlib import Path
+home = Path(sys.argv[1])
+dispatch = json.loads((home / 'config/crew-dispatch.json').read_text())
+for profile in [dispatch['default'], *(rule['use'] for rule in dispatch['rules'])]:
+    for candidate in profile if isinstance(profile, list) else [profile]:
+        assert candidate['harness'] in {'codex', 'claude', 'cursor', 'opencode'}
+        assert candidate.get('effort', 'low') in {'low', 'medium', 'high'}
+assert (home / 'config/backend').read_text().strip() == 'herdr'
+assert (home / 'data/captain.md').is_file()
+print('Configuration valid: high planning, medium management, low execution.')
+PY
+}
+
+case "${1:-}" in
+  --connect-opencode)
+    opencode auth login --provider openai --method 'ChatGPT Pro/Plus (browser)' --pure
+    exec python "$SWARM_DIR/bin/enable-opencode.py"
+    ;;
+  --finish-opencode)
+    exec python "$SWARM_DIR/bin/enable-opencode.py"
+    ;;
+  --check)
+    check_setup
+    exit
+    ;;
+  --manager)
+    if [[ "${HERDR_ENV:-}" != 1 ]]; then
+      printf 'Start the workspace with: %s\n' "$SWARM_DIR/swarm" >&2
+      exit 1
+    fi
+    check_setup
+    mkdir -p "$FM_HOME/state"
+    exec 9>"$FM_HOME/state/.manager-launch.lock"
+    if ! flock -n 9; then
+      printf 'This swarm already has a manager. Select its pane in Herdr.\n' >&2
+      exit 75
+    fi
+    cd -- "$FM_SWARM_CODE_ROOT"
+    exec codex --model gpt-6.1-sol \
+      -c 'model_reasoning_effort="medium"' \
+      -c 'features.multi_agent=false' \
+      --add-dir "$FM_HOME" \
+      --approve-for-me \
+      "$(cat "$SWARM_DIR/manager-start.md")"
+    ;;
+  "")
+    check_setup
+    if [[ "${HERDR_ENV:-}" == 1 ]]; then
+      exec "$SWARM_DIR/swarm" --manager
+    fi
+    cd -- "$FM_SWARM_CODE_ROOT"
+    export SHELL="$SWARM_DIR/bin/herdr-shell"
+    exec herdr --session firstmate-tiered
+    ;;
+  *)
+    printf 'Usage: %s [--check | --manager | --connect-opencode | --finish-opencode]\n' "$0" >&2
+    exit 2
+    ;;
+esac

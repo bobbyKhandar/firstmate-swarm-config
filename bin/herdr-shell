@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -u
+SWARM_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+export SHELL=/bin/bash
+
+# Only the initial shell in the code root offers a manager. Worker panes keep
+# ordinary shells; the manager launcher also holds a per-home process lock.
+if [[ "${HERDR_ENV:-}" == 1 && "$PWD" == "${FM_SWARM_CODE_ROOT:-$SWARM_DIR/home}" && "${1:-}" != -c ]]; then
+  "$SWARM_DIR/swarm" --manager
+fi
+exec /bin/bash "$@"

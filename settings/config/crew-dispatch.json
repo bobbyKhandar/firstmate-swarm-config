@@ -1,0 +1,80 @@
+{
+  "rules": [
+    {
+      "when": "The task is a separate read-only planning assignment: architecture, decomposition, acceptance criteria, or a design decision needed before implementation. It is not routine task coordination or implementation from an accepted plan.",
+      "use": [
+        {
+          "harness": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        },
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "high"
+        }
+      ],
+      "why": "High reasoning belongs in bounded planning. Return a concise plan and stop before implementation."
+    },
+    {
+      "when": "The task is narrow read-only reconnaissance, file gathering, a mechanical edit, formatting, a targeted rename, or another straightforward operation with clear acceptance criteria.",
+      "use": [
+        {
+          "harness": "claude",
+          "model": "haiku",
+          "effort": "low"
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-6-luna",
+          "effort": "low"
+        }
+      ],
+      "why": "Keep the highest-volume routine work on explicit low-reasoning profiles whose live account probes passed."
+    },
+    {
+      "when": "The task is scoped implementation or straightforward tests from a sufficiently clear accepted plan, without unresolved architecture or a previous inadequate low-tier attempt.",
+      "use": [
+        {
+          "harness": "codex",
+          "model": "gpt-6-luna",
+          "effort": "low"
+        },
+        {
+          "harness": "claude",
+          "model": "haiku",
+          "effort": "low"
+        }
+      ],
+      "why": "Execution starts at low reasoning after planning has removed ambiguity. Choose among subscriptions using current quota evidence."
+    },
+    {
+      "when": "The task is an additional independent review explicitly requested or justified by the change, ambiguous debugging, or implementation that the manager has explicitly escalated after a low-tier attempt was inadequate. Routine acceptance code review is performed by the medium-reasoning manager itself and is not a worker assignment. Unresolved architectural planning decisions belong to the planning rule.",
+      "use": [
+        {
+          "harness": "claude",
+          "model": "sonnet",
+          "effort": "medium"
+        },
+        {
+          "harness": "codex",
+          "model": "gpt-6-luna",
+          "effort": "medium"
+        }
+      ],
+      "why": "Use medium reasoning for an additional review or a demonstrated need. An extra reviewer assists rather than replaces the manager's personal code review; return architectural uncertainty to the high-tier planner."
+    }
+  ],
+  "default": [
+    {
+      "harness": "codex",
+      "model": "gpt-6-luna",
+      "effort": "low"
+    },
+    {
+      "harness": "claude",
+      "model": "haiku",
+      "effort": "low"
+    }
+  ]
+}
