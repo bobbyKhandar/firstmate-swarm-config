@@ -4,39 +4,61 @@ Use one visible Herdr workspace and one Firstmate manager as the point of contac
 
 ## Host control context
 
-The Codex manager keeps its normal approval review and sandbox settings. Invoke Firstmate's bin/fm-*.sh control scripts with exec_command sandbox_permissions="require_escalated", including session start, lock ownership checks, spawning, steering, supervision, and lifecycle operations. These scripts need host process identities, Herdr IPC, and the worker runtime; a sandboxed shell has a separate PID namespace and can misidentify its sandbox wrapper as the manager. Ordinary read-only inspection can remain sandboxed. Never fix a refused host operation by disabling approval or rewriting lock files by hand.
+The Codex manager runs in Codex's workspace-write sandbox. By default the launcher passes `--approve-for-me`, so its escalation requests are approved by Codex's automatic reviewer, not by the captain; with `SWARM_MANAGER_APPROVAL=manual` they go to the captain. Invoke Firstmate's bin/fm-*.sh control scripts with exec_command sandbox_permissions="require_escalated", including session start, lock ownership checks, spawning, steering, supervision, and lifecycle operations. These scripts need host process identities, Herdr IPC, and the worker runtime; a sandboxed shell has a separate PID namespace and can misidentify its sandbox wrapper as the manager. Ordinary read-only inspection can remain sandboxed. Never fix a refused host operation by disabling approval or rewriting lock files by hand.
 
 ## Reasoning tiers
 
 - Planning: high reasoning for architecture, decomposition, material uncertainty, and acceptance criteria. Use a bounded read-only planning scout when those decisions require separate work. Return a concise plan with dependencies, allowed files or components, checks, and risks. A sufficiently explicit user-supplied plan does not need another planning pass.
 - Management: the primary Codex manager uses gpt-6.1-sol at medium reasoning. It assigns bounded tasks, supervises workers, personally code reviews their changes, requests fixes, and accepts the result. It does not redo every worker's investigation or promote itself to high reasoning for ordinary coordination and task acceptance review.
-- Doing: use Codex gpt-6-luna with extra-high reasoning (effort xhigh) for execution, tests, mechanical work, and routine investigations. This replaces the earlier low-reasoning Codex/Haiku defaults. Do not silently downgrade effort or switch models to work around quota or access. Escalate material uncertainty or inadequate results through the normal task lifecycle; high-reasoning architectural planning and the medium manager's own code review remain separate roles.
+- Doing: use Codex gpt-6-luna with extra-high reasoning (effort xhigh) for execution, tests, mechanical work, and routine investigations. This replaces the earlier low-reasoning Codex/Haiku defaults. Do not silently downgrade effort or switch models to work around quota or access. Escalate material uncertainty to the planner. High-reasoning architectural planning and the medium manager's own code review remain separate roles.
+- Escalation ladder for an inadequate worker attempt: GPT-6 Luna xhigh, then Codex gpt-6.1-sol high, then Codex gpt-6.1-sol xhigh. Move up one step when the manager rejects an attempt, or when the same finding survives two CHANGES REQUESTED rounds. Escalate with `bin/fm-control.sh <worker> relaunch --model <model> --effort <effort> --note <reason>` so the task keeps its worktree, branch, and PR, and review the new head as usual. If the gpt-6.1-sol xhigh attempt is also inadequate, stop and report to the captain instead of retrying.
 
-## Assignment and manager review loop
+## Swarm contract (granted per task)
 
-The manager owns acceptance of every implementation task. The user explicitly wants the manager to direct the small swarm and then review its code. This bounded, read-only acceptance review is performed by the manager itself, even where the general supervisor contract delegates broader project audits. Project changes still belong to workers.
+The captain wants the manager to direct a small swarm, review each worker's code, and stage the accepted work on one integration branch. Firstmate's AGENTS.md lets only a current, explicit, concrete captain instruction relax its standing rules, and never turns one request into standing authority, so this authority is granted per task at intake, not by this file.
 
-1. Assign each worker a concrete objective, accepted plan when needed, relevant files or components, acceptance criteria, and appropriate verification. Keep assignments small enough to review independently; coordinate dependencies before parallel dispatch.
-2. Require a handoff identifying the local copy and exact revision or diff, changed files, what was implemented, checks actually run and their outcomes, and remaining risks or decisions. A worker completion signal opens manager review; it does not constitute manager acceptance.
+At intake for implementation work in a GitHub-backed project, propose this contract in one short message and wait for the captain's go-ahead. A captain task message that already states it is the go-ahead.
+
+- Project, task name `<name>`, and integration branch `<prefix><name>`, which the manager creates from `<base>` (normally the default branch).
+- Workers `<name>-worker-1` to `<name>-worker-N` on branches `<prefix><name>-worker-N`, delivery mode `direct-PR`, each opening its PR into the integration branch. List each worker's owned paths and dependencies.
+- The manager posts a verdict comment on every worker PR and merges approved PRs one at a time into the integration branch through `bin/fm-pr-merge.sh`; yolo is on for these worker PRs only.
+- When every worker PR is merged, the manager opens one PR from the integration branch into `<base>` and reports it. Merging into `<base>` stays with the captain.
+
+`<prefix>` is the project's registered branch prefix unless the captain names another; an empty prefix gives exactly `<name>` and `<name>-worker-1`. Git cannot hold both `<name>` and `<name>/...`, which is why workers use `-worker-N`. Anything outside the approved contract, such as another worker, a different branch, a merge into `<base>`, or a force push, needs a new explicit instruction. If the captain declines, or the task must ship through `no-mistakes`, follow Firstmate's delivery path unchanged and add no manager review gate.
+
+## Planning and boundaries
+
+Workers must never change the same code, whether the task has two workers or twenty. The helper is `$FM_SWARM_DIR/bin/swarm-branches`; run its `create-integration`, `boundary`, and `overlap` commands in the host context, like Firstmate's control scripts, because they reach GitHub.
+
+1. Create the plan with `swarm-branches init data/swarm/<name>.json --project OWNER/REPO --name <name> --workers N [--prefix P] [--base B]`. The planner proposes the split; the manager records each worker's `owns` (repository-relative files or directories; a directory covers everything under it) and `depends_on`.
+2. Every path a task changes belongs to exactly one worker. When several workers need one file, give it to one owner and make the others depend on that worker; a dependent worker starts after its dependency has merged and first merges `origin/<prefix><name>` into its branch.
+3. `swarm-branches check` must pass before dispatch. It rejects overlapping ownership and dependency cycles and prints the merge order.
+4. Run `swarm-branches create-integration`. Then scaffold each worker's brief and spawn it as `<name>-worker-N` with `--mode direct-PR --yolo on --branch-prefix <prefix>` and its dispatch profile, passing the same mode and prefix to `bin/fm-brief.sh` and `bin/fm-spawn.sh`; the spawn refuses a brief that records different values.
+5. Each worker's brief states its branch, PR base, owned paths, the other workers' paths as read-only, its dependencies, the objective, acceptance criteria, and checks.
+
+## Review loop for each worker PR
+
+1. Require a handoff with the PR URL, branch, head SHA, changed files, what was implemented, checks actually run and their outcomes, and remaining risks. A worker completion signal opens manager review; it is not acceptance.
+2. Run `swarm-branches boundary data/swarm/<name>.json <worker> --repo <project clone>`. Any path outside the worker's ownership is a finding.
 3. At medium reasoning, personally inspect the actual diff and necessary surrounding code against the assignment. Check correctness, relevant edge cases, regressions, scope, and the adequacy of verification. Read test evidence and run targeted, non-mutating checks when needed. A worker summary or green checks alone are insufficient. If the diff cannot be inspected, report the blocker instead of accepting it.
-4. Send actionable findings with file/line references and expected behavior back to the same worker through Firstmate's normal steering and validation paths. The manager does not patch project files itself. The worker fixes the findings and returns the updated diff and verification; re-review the latest changes before accepting. If the worker is unavailable or an execution attempt proves inadequate, explicitly reassign or escalate through the normal task lifecycle rather than silently dropping findings or repeating an open-ended retry loop.
-5. Record the reviewed revision or diff identity, review outcome, verification evidence, and resolution of findings in the task's durable notes. Report work as ready for the user's review or delivery only after manager acceptance and required project validation. Manager acceptance does not grant merge or cleanup authority.
+4. Post one verdict as a PR comment with gh-axi, and send the same text to the worker through Firstmate's normal steering path:
+   - `Manager review: CHANGES REQUESTED at <sha>`, followed by numbered findings, each with file and line, the problem, and the expected behavior.
+   - `Manager review: REJECTED at <sha>`, followed by the reason, when the approach must be redone rather than patched.
+   - `Manager review: APPROVED at <sha>`, followed by the checks relied on.
+   Every agent here shares one GitHub login, and GitHub does not let an account approve or request changes on its own pull request, so verdicts are comments rather than formal reviews.
+5. The worker pushes new commits to the same branch and returns a finding-by-finding resolution. Review every new head again; an approval covers only the SHA it names. If the worker is unavailable, reassign it through the normal task lifecycle; if an attempt proves inadequate, follow the escalation ladder above rather than silently dropping findings or repeating an open-ended retry loop.
+6. The manager never edits, commits, or pushes project code itself.
 
-An additional independent reviewer may assist when justified by the change or explicitly requested, within the manager's chosen concurrency. It does not replace the manager's own acceptance review. Preserve the generated worker status protocol, required validation, and existing delivery and merge boundaries; do not invent status events or bypass lifecycle scripts.
+An additional independent reviewer may assist when justified by the change or explicitly requested, within the manager's chosen concurrency. It does not replace the manager's own review. Preserve the generated worker status protocol, required validation, and existing delivery and merge boundaries; do not invent status events or bypass lifecycle scripts.
 
-## Branches and GitHub publication
+## Staged merges
 
-For user-requested implementation in an identified GitHub-backed project, routine creation of task branches, task commits, and ordinary pushes of those task branches to the project's configured remote are authorized without another permission question. Use the project's branch naming rules and isolated task copy. Explicit local-only instructions or narrower task restrictions still win. This does not authorize creating repositories, changing visibility or remotes, publishing unrelated work, or pushing to a protected or default branch.
+1. Merge approved PRs one at a time in the order `swarm-branches check` prints, each with `bin/fm-pr-merge.sh <worker> <pr-url>`. It refuses unless the PR is open, mergeable, conflict-free, and green at its exact head, so confirm that head is the approved SHA first.
+2. After each merge, run `swarm-branches overlap` and re-read the remaining PRs. When one now conflicts, steer its worker to merge `origin/<prefix><name>` into its branch, resolve the conflict, rerun its checks, and push. Workers never rebase a pushed branch or force-push. Review the new head before approving again.
+3. When every worker PR is merged and the integration branch's checks pass, open one PR from the integration branch into `<base>` with gh-axi. Report its full URL to the captain with the merged worker PRs, approved SHAs, and verification. Do not merge it.
+4. Record the contract, plan file, each PR's verdict history and approved SHA, the merge order, and the final PR URL in the task's durable notes.
 
-Workers may create their task branch, commit the scoped changes, and push as required by the selected delivery workflow. A pipeline-owned preliminary push or PR is not manager acceptance. Keep required validation and publication under the selected workflow; do not bypass an active pipeline or its approval decisions.
-
-The manager owns final GitHub delivery. After personally reviewing the final diff and completing the validation prerequisites for publication, ensure the exact reviewed revision is pushed to the task branch. Direct the owning worker when the selected pipeline owns the push; otherwise the manager may perform an ordinary final task-branch push itself. This is explicit narrow standing authority for task-branch creation and publication even where the general supervisor contract prohibits project state changes; it does not permit the manager to edit project code or commit worker changes itself. Preserve normal tool approval review and host-control requirements.
-
-Before a final push, confirm the project, configured remote, task branch, and reviewed HEAD. Any later code change requires review again. Use a normal non-forced push; if it is rejected or the remote has unexpected changes, reconcile through the owning worker and re-review rather than overwrite remote work. Never force-push, delete branches, rewrite published history, or push secrets under this permission.
-
-Verify the remote task branch contains the reviewed revision, retain the branch and commit or PR URL in the task record, and complete any required post-push checks before reporting delivery ready. If the branch is already current, verify it rather than manufacture another commit or push. A successful local commit alone is not GitHub delivery. Missing credentials or a rejected protected operation is a concrete blocker, not a reason to disable review.
-
-Merging or pushing directly into the default branch still requires the user's explicit authorization. This publication permission does not grant merge, release, deployment, visibility-change, or unlanded-work cleanup authority.
+Never force-push, delete branches, rewrite published history, push secrets, change repository visibility or remotes, or merge or push into `<base>`. Missing credentials or a refused protected operation is a blocker to report, not a reason to work around review.
 
 ## Size and cost
 
@@ -50,6 +72,6 @@ Use each native CLI's existing authentication. Use the authentication method sup
 
 Cursor is excluded from automatic tiered dispatch by default. Enable a pinned route only after a live named-model probe succeeds for the local account. If the user explicitly requests Cursor Auto, disclose that the reasoning tier is not pinned. Do not silently substitute Auto for the requested worker profile. Restore pinned Cursor routes only after current account access and a live named-model probe establish that they work. No upgrade or paid overage is authorized by this setup.
 
-The optional OpenCode helper uses official ChatGPT OAuth. Keep OpenCode outside automatic dispatch until its official OAuth login and GPT-6 Luna xhigh live probe pass. The companion enable command records success in state/opencode-verified.json and adds only a catalog-verified openai/gpt-6-luna profile with xhigh reasoning to crew-dispatch.json. Inspect current credentials and quota evidence when dispatching; a second client does not create another subscription allowance. The current Firstmate adapter maps xhigh for OpenAI-backed OpenCode models. Enable only the exact requested model and effort after its live probe passes; otherwise leave the route disabled.
+OpenCode stays outside automatic dispatch: the pinned Firstmate's bootstrap rejects any OpenCode profile that sets an effort, so an OpenCode xhigh route would make crew-dispatch.json invalid. Do not add one by hand or drop its effort. The optional helper refuses unless SWARM_OPENCODE_FORCE=1 is set for a Firstmate version that accepts it; then it uses official ChatGPT OAuth, records success in state/opencode-verified.json, and adds only a catalog-verified openai/gpt-6-luna xhigh profile. A second client does not create another subscription allowance.
 
-Only act on user-requested tasks. The task-branch publication permission above applies only to requested work in the identified project. Project registration, other outward publication, merging, cleanup of unlanded work, and remaining authority boundaries continue to follow the normal Firstmate contracts.
+Only act on user-requested tasks. A swarm contract covers only the task, project, and branches the captain approved. Project registration, other outward publication, merging into `<base>`, cleanup of unlanded work, and remaining authority boundaries continue to follow the normal Firstmate contracts.
