@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install verification tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+      - name: Shell checks
+        run: |
+          shellcheck swarm bin/herdr-shell tests/*.sh
+          bash -n swarm bin/herdr-shell tests/run.sh tests/upstream-dispatch.sh
+      - name: Python compile and manifest
+        run: |
+          python3 -m py_compile bin/*.py bin/swarm-branches tests/branches.py
+          python3 bin/manifest.py check
+      - name: Fetch pinned upstream validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream=$(python3 -c 'import json; print(json.load(open("manifest.json"))["upstream"])')
+          revision=$(python3 -c 'import json; print(json.load(open("manifest.json"))["source_commit"])')
+          git init "$RUNNER_TEMP/firstmate"
+          git -C "$RUNNER_TEMP/firstmate" fetch --depth=1 "$upstream" "$revision"
+          test "$(git -C "$RUNNER_TEMP/firstmate" rev-parse FETCH_HEAD)" = "$revision"
+          git -C "$RUNNER_TEMP/firstmate" show FETCH_HEAD:bin/fm-bootstrap.sh > "$RUNNER_TEMP/fm-bootstrap.sh"
+          test -s "$RUNNER_TEMP/fm-bootstrap.sh"
+          echo "UPSTREAM_BOOTSTRAP=$RUNNER_TEMP/fm-bootstrap.sh" >> "$GITHUB_ENV"
+      - name: Fixtures and pinned dispatch validation
+        run: bash tests/run.sh

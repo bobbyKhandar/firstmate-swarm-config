@@ -3,16 +3,17 @@
   "upstream": "https://github.com/kunchenguid/firstmate.git",
   "source_commit": "42dd906d02f672652606057a193a6386b956c3f3",
   "files": {
+    ".github/workflows/ci.yml": "ce213cf071405898570511eb3832633b659d4d3ea15569448e13516d168f59a4",
     ".gitignore": "76d05f2adfddc68f9a3a9317bcc51f9406ef52f0f5c77d3734102d19eb1f126d",
     "LICENSE": "ce9ddd9e32b477bc36acf51dc71bb3ba6e09b13e9b102d190e10945420b5223b",
-    "README.md": "4181c8370bf8e3dfe0fe26244d5b427025b14daed1bb6f57d1893678b64f3749",
+    "README.md": "836de26b301403a6bb4c8e24b826066e4a4725ed5f4da0a23998d950a48675f4",
     "bin/check-setup.py": "dfa594464caed9347e9c35dd1cc1f99a6584f7d5e9a6971060f76e97da9ec7af",
     "bin/enable-opencode.py": "177f957c75cf060534c19bc5af9ebdd1ec09c1c3e11b21e358bace5a6ade69db",
     "bin/herdr-shell": "68c8ed7bebce727fab13a33b4e854576cd63a478410c60f7bf1ebd384ffce47c",
     "bin/manifest.py": "64db8a0ced0d57bc8a91a2ca5ba2d180d0c7b277f5cc31947d996f407dcf8acc",
-    "bin/swarm-branches": "18e096b3f7c7247541a4cf48e8125c25fb2ddbd5dcb61bd89f7b45611d5bf322",
-    "manager-start.md": "254902af8c8f33e35a5e05099948fb46ef177b82427bb753fbdc02ddc7fb79d4",
-    "settings/captain.md": "e00810b44de3620a7716fe9b97bd3439e59385ee2e5ab4b3357eaa2c199b7fdf",
+    "bin/swarm-branches": "61f917fdea564d4ce54f9bc20231e294a90e5e3f98508d24a8f7c879c1d0f8d3",
+    "manager-start.md": "ff50264dec737cd036b6c80dfe50936f8b2f20dfebbca6ea471e756f2c719942",
+    "settings/captain.md": "d10209d3f716efb5ebc5e199145ca22ef6a6afe17335581de898f9b4c3cbaf7d",
     "settings/config/backend": "cf8f09d5c26f8f2acdac8f6fc837505fcbdaf12d1ea7f34c08a58c07eb5bc564",
     "settings/config/brief-include.md": "ac650333a600c627aaa0cf887e3ab81ae322f5fbaf471fda4f1eda1bd699be41",
     "settings/config/claude-permission-mode": "6d1dbb9c582de44ad1dbc0d24eca4d831d8172bef0593680ecd24f6d0ce9def5",
@@ -22,7 +23,8 @@
     "settings/config/startup-memory-budget": "0d5f5787265adcabadcbe5607a8f7c8d13c872e066e8b127e7d699437caeecf7",
     "settings/config/supervision-host-off": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
     "swarm": "09cc96e6a01ea60ba4f3df70ade66b43a1c168605423849d6f1a67650df6e3e7",
-    "tests/run.sh": "713191c7326fa4410afe0e4824a62ffd984a9fff7314c1a7791bd72ed42dd1b9",
+    "tests/branches.py": "88370f5c114e7b40b1342d6cfe605cb3ea1f996e2f8b4f472a5fe0c4fb472008",
+    "tests/run.sh": "0e49414993fa4c6d0510fb9f20c93b4a6d3ecf54824c3e69c868ce0f26880437",
     "tests/upstream-dispatch.sh": "21673b07d87925e36540938b38ae731593dd7d1eeab078f1a11a3c3f6b743f21"
   }
 }

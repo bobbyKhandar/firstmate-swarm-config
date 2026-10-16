@@ -11,10 +11,13 @@ where a worker expects to work; it is not an exclusive lock.
   boundary PLAN WORKER (--repo CLONE [--no-fetch] | --files FILE)
   overlap PLAN --repo CLONE [--no-fetch]
   conflicts PLAN --repo CLONE [--no-fetch]
+  reconcile PLAN --repo CLONE
   create-integration PLAN
 """
 import argparse
 import json
+import os
+import tempfile
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -208,23 +211,59 @@ def shared_claims(plan):
     return claims
 
 
-def git(repo, *args, identity=False):
-    command = ["git", "-C", repo]
+def git(repo, *args, identity=False, raw=False):
+    command = ["git", "--literal-pathspecs", "-C", repo]
     if identity:
         command += ["-c", "user.email=swarm-conflicts@localhost", "-c", "user.name=swarm-conflicts"]
-    return subprocess.run([*command, *args], capture_output=True, text=True)
+    return subprocess.run([*command, *args], capture_output=True, text=not raw,
+                          **({} if raw else {"errors": "replace"}))
 
 
-CONFLICT_PATH = re.compile(r"^CONFLICT \([^)]+\): (?:Merge conflict in )?(\S+)")
+def display(path):
+    return json.dumps(path, ensure_ascii=False) if any(ord(c) < 32 or c in '\"\\' for c in path) else path
 
 
 def conflicted_paths(output):
-    found = []
-    for line in output.splitlines():
-        match = CONFLICT_PATH.match(line.strip())
-        if match and match.group(1) not in found:
-            found.append(match.group(1))
-    return found
+    # -z: tree OID, conflicted names, empty record, then structured messages.
+    fields = output.split(b"\0")[1:]
+    paths = []
+    for field in fields:
+        if not field:
+            break
+        paths.append(os.fsdecode(field))
+    return paths
+
+
+def ancestor(repo, head, base):
+    result = git(repo, "merge-base", "--is-ancestor", head, base)
+    if result.returncode not in (0, 1):
+        fail(f"could not verify ancestry of {head}: {result.stderr.strip()}")
+    return result.returncode == 0
+
+
+def pending_workers(plan, repo, order, present):
+    pending = []
+    target = f"origin/{integration(plan)}"
+    for worker_id in order:
+        head = branch(plan, worker_id)
+        record = worker_entry(plan, worker_id).get("landed")
+        if record is not None:
+            if (not isinstance(record, dict)
+                    or set(record) != {"pr_url", "head_sha", "merge_commit_sha"}
+                    or not re.fullmatch(r"https://github.com/" + re.escape(plan["project"]) + r"/pull/[1-9][0-9]*", str(record.get("pr_url")))
+                    or any(not re.fullmatch(r"[0-9a-f]{40}", str(record.get(key)))
+                           for key in ("head_sha", "merge_commit_sha"))):
+                fail(f"invalid landed record for {worker_id}; reconcile the plan")
+            if not ancestor(repo, record["merge_commit_sha"], target):
+                fail(f"stale landed record for {worker_id}: merge commit is not in integration")
+            if head in present and git(repo, "rev-parse", f"origin/{head}").stdout.strip() != record["head_sha"]:
+                fail(f"landed head changed for {worker_id}; review and reconcile before proceeding")
+            continue
+        if head not in present:
+            fail(f"missing worker branch {head}; completion cannot be verified")
+        if not ancestor(repo, f"origin/{head}", target):
+            pending.append(worker_id)
+    return pending
 
 
 def remote_branches(repo, names, fetch):
@@ -247,11 +286,11 @@ def remote_branches(repo, names, fetch):
 
 
 def changed_files(repo, base_branch, head_branch):
-    diff = git(repo, "diff", "--name-only", "--no-renames",
-               f"origin/{base_branch}...origin/{head_branch}")
+    diff = git(repo, "diff", "--name-only", "--no-renames", "-z",
+               f"origin/{base_branch}...origin/{head_branch}", raw=True)
     if diff.returncode:
-        fail(f"could not diff {head_branch} against {base_branch}: {diff.stderr.strip()}")
-    return [line for line in diff.stdout.splitlines() if line]
+        fail(f"could not diff {head_branch} against {base_branch}: {os.fsdecode(diff.stderr).strip()}")
+    return [os.fsdecode(name) for name in diff.stdout.split(b"\0") if name]
 
 
 def owner_of(plan, path):
@@ -337,7 +376,7 @@ def cmd_boundary(args):
     print(f"{args.worker} changed {len(outside)} paths outside its boundary:")
     for path in outside:
         owner = owner_of(plan, path)
-        print(f"  {path} (owned by {owner})" if owner else f"  {path} (owned by no worker)")
+        print(f"  {display(path)} (owned by {owner})" if owner else f"  {display(path)} (owned by no worker)")
     sys.exit(1)
 
 
@@ -348,11 +387,10 @@ def cmd_overlap(args):
     present = remote_branches(args.repo, [integration(plan), *heads], not args.no_fetch)
     if integration(plan) not in present:
         fail(f"branch {integration(plan)} is not on origin yet")
+    pending = pending_workers(plan, args.repo, order, present)
     touched = {}
-    for worker_id, head in zip(order, heads):
-        if head not in present:
-            print(f"{worker_id}: {head} is not on origin yet; skipped")
-            continue
+    for worker_id in pending:
+        head = branch(plan, worker_id)
         for path in changed_files(args.repo, integration(plan), head):
             touched.setdefault(path, []).append(worker_id)
     shared = {path: ids for path, ids in sorted(touched.items()) if len(ids) > 1}
@@ -361,7 +399,7 @@ def cmd_overlap(args):
         return
     print("Files changed by more than one open worker branch:")
     for path, ids in shared.items():
-        print(f"  {path}: {', '.join(ids)}")
+        print(f"  {display(path)}: {', '.join(ids)}")
     print("Shared edits are allowed. Run: swarm-branches conflicts " + args.plan)
 
 
@@ -378,50 +416,144 @@ def cmd_conflicts(args):
     present = remote_branches(args.repo, [integration(plan), *heads], not args.no_fetch)
     if integration(plan) not in present:
         fail(f"branch {integration(plan)} is not on origin yet")
-    touched = {}
-    for worker_id, head in zip(order, heads):
-        if head not in present:
-            continue
-        for path in changed_files(args.repo, integration(plan), head):
-            touched.setdefault(path, []).append(worker_id)
-    current = f"origin/{integration(plan)}"
-    for worker_id, head in zip(order, heads):
-        if head not in present:
-            print(f"{worker_id}: {head} is not on origin yet; skipped")
-            continue
-        merged = git(args.repo, "merge-tree", "--write-tree", "--name-only", current, f"origin/{head}")
+    pending = pending_workers(plan, args.repo, order, present)
+    current = git(args.repo, "rev-parse", f"origin/{integration(plan)}").stdout.strip()
+    clean = []
+    for worker_id in pending:
+        head = branch(plan, worker_id)
+        head_sha = git(args.repo, "rev-parse", f"origin/{head}").stdout.strip()
+        merged = git(args.repo, "merge-tree", "--write-tree", "--name-only", "-z",
+                     current, head_sha, raw=True)
         if merged.returncode == 0:
-            tree = next((line.strip() for line in merged.stdout.splitlines() if line.strip()), "")
-            parent = git(args.repo, "rev-parse", current)
-            made = git(args.repo, "commit-tree", tree, "-p", parent.stdout.strip(),
+            tree = os.fsdecode(merged.stdout.split(b"\0", 1)[0]).strip()
+            made = git(args.repo, "commit-tree", tree, "-p", current, "-p", head_sha,
                        "-m", f"swarm-conflicts {worker_id}", identity=True)
-            if parent.returncode or made.returncode or not re.fullmatch(r"[0-9a-f]{40}", made.stdout.strip()):
-                fail(f"could not stack a clean merge of {head}: {(made.stderr or merged.stderr).strip()}")
+            if made.returncode or not re.fullmatch(r"[0-9a-f]{40}", made.stdout.strip()):
+                fail(f"could not stack a clean merge of {head}: {made.stderr.strip()}")
             current = made.stdout.strip()
+            clean.append(worker_id)
             continue
         if merged.returncode != 1:
-            fail(f"could not try merging {head}: {merged.stderr.strip()}")
+            fail(f"could not try merging {head}: {os.fsdecode(merged.stderr).strip()}")
+        print(f"Conflict merging {head} ({head_sha}) into the integration result:")
+        if clean:
+            print("Merge this clean prefix first, then refresh this report: " + ", ".join(clean))
         paths = conflicted_paths(merged.stdout)
-        print(f"Conflict merging {head} into the integration result:")
         if not paths:
-            print(merged.stdout.strip())
+            print("Conflict has no individual file entries; inspect the complete merge-tree diagnostics:")
+            print(os.fsdecode(merged.stdout).replace("\0", "\n"))
         for path in paths:
-            editors = touched.get(path, [worker_id])
-            print(f"  {path}: {', '.join(editors)}")
-            for editor in editors:
-                diff = git(args.repo, "diff", "--unified=3",
-                           f"origin/{integration(plan)}...origin/{branch(plan, editor)}", "--", path)
-                print(f"--- {editor} changed {path} relative to {integration(plan)} ---")
-                print(diff.stdout.rstrip() or "(no textual diff; the file may have been renamed or deleted)")
-        resolve = f"{integration(plan)}-resolve-1"
-        print(f"Dispatch the conflict helper. It reads every side above, pushes a fresh branch {resolve}, "
-              f"and opens a PR into {integration(plan)}. The saved resolution is that GitHub branch.")
+            print(f"  {display(path)}")
+        # Include full side patches: a conflict can be reported under a renamed
+        # destination while another contributor edited the original pathname.
+        # Restricting patches to reported names loses that contributor's intent.
+        for editor, revision in [("integration", f"origin/{integration(plan)}"),
+                                 *[(e, f"origin/{branch(plan, e)}") for e in pending]]:
+            against = head_sha if editor == "integration" else f"origin/{integration(plan)}"
+            base = git(args.repo, "merge-base", revision, against)
+            if base.returncode:
+                fail(f"could not find merge base for {editor}: {base.stderr.strip()}")
+            diff = git(args.repo, "diff", "--binary", "--find-renames", "--no-ext-diff", "--no-textconv",
+                       "--unified=3", base.stdout.strip(), revision)
+            if diff.returncode:
+                fail(f"could not inspect {editor}: {diff.stderr.strip()}")
+            print(f"--- {editor} changed {', '.join(display(path) for path in paths)}; "
+                  "complete side diff relative to its merge base ---")
+            print(diff.stdout.rstrip() or "(no changes on this side relative to its merge base)")
+        if args.no_fetch:
+            names = git(args.repo, "for-each-ref", "--format=%(refname:strip=3)", "refs/remotes/origin/").stdout.splitlines()
+        else:
+            listed = git(args.repo, "ls-remote", "--heads", "origin")
+            if listed.returncode:
+                fail(f"could not allocate a resolution name: {listed.stderr.strip()}")
+            names = [line.split("refs/heads/", 1)[1] for line in listed.stdout.splitlines()]
+        number = 1
+        while f"{integration(plan)}-resolve-{number}" in names:
+            number += 1
+        resolve = f"{integration(plan)}-resolve-{number}"
+        print(f"After merging the clean prefix and refreshing, dispatch the conflict helper. "
+              f"Start {resolve} from current integration, merge reviewed head {head_sha}, "
+              f"resolve every side, and preserve both parents. Open its PR into {integration(plan)}. "
+              "Recheck the branch name is unused before pushing; --no-fetch only knows local refs.")
         sys.exit(1)
-    print("No merge conflicts. Worker branches can merge into the integration branch in order.")
+    if pending:
+        print("No merge conflicts. Worker branches can merge into the integration branch in order.")
+    else:
+        print("All worker revisions accounted for in integration. Run integration checks before delivery.")
 
 
 def gh(*args):
     return subprocess.run(["gh", *args], capture_output=True, text=True)
+
+
+def cmd_reconcile(args):
+    plan = load(args.plan)
+    order = require_valid(plan)
+    allowed = {f"https://github.com/{plan['project']}", f"https://github.com/{plan['project']}.git",
+               f"git@github.com:{plan['project']}.git", f"ssh://git@github.com/{plan['project']}.git"}
+    # Read configured URL, before Git's insteadOf transport rewrites.
+    remote = git(args.repo, "config", "--get", "remote.origin.url").stdout.strip()
+    if remote.lower() not in {url.lower() for url in allowed}:
+        fail("origin does not match the planned GitHub repository")
+    heads = [branch(plan, worker_id) for worker_id in order]
+    present = remote_branches(args.repo, [integration(plan), *heads], True)
+    if integration(plan) not in present:
+        fail("integration branch is missing on origin")
+    prs = []
+    page = 1
+    while True:
+        result = gh("api", f"repos/{plan['project']}/pulls?state=closed&per_page=100&page={page}")
+        if result.returncode:
+            fail("GitHub PR data unavailable; plan unchanged")
+        try:
+            batch = json.loads(result.stdout)
+            if not isinstance(batch, list):
+                raise ValueError("expected a PR list")
+        except ValueError:
+            fail("invalid GitHub PR response; plan unchanged")
+        prs.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    for worker_id, head in zip(order, heads):
+        matches = [pr for pr in prs if pr.get("head", {}).get("ref") == head and pr.get("merged_at")]
+        if not matches:
+            if worker_entry(plan, worker_id).get("landed") is not None:
+                fail(f"could not reverify landed PR for {head}; plan unchanged")
+            continue
+        if len(matches) != 1:
+            fail(f"ambiguous merged PRs for {head}; plan unchanged")
+        pr = matches[0]
+        base, source = pr.get("base", {}), pr.get("head", {})
+        if (base.get("ref") != integration(plan)
+                or base.get("repo", {}).get("full_name", "").lower() != plan["project"].lower()
+                or (source.get("repo") or {}).get("full_name", "").lower() != plan["project"].lower()):
+            fail(f"merged PR repository/base mismatch for {head}; plan unchanged")
+        sha, merge = source.get("sha", ""), pr.get("merge_commit_sha", "")
+        url = pr.get("html_url", "")
+        if (not all(re.fullmatch(r"[0-9a-f]{40}", value or "") for value in (sha, merge))
+                or not re.fullmatch(r"https://github.com/" + re.escape(plan["project"]) + r"/pull/[1-9][0-9]*", url)):
+            fail(f"invalid merged PR evidence for {head}; plan unchanged")
+        if head in present and git(args.repo, "rev-parse", f"origin/{head}").stdout.strip() != sha:
+            fail(f"merged PR head changed for {head}; plan unchanged")
+        if not ancestor(args.repo, merge, f"origin/{integration(plan)}"):
+            fail(f"merge commit for {head} is not in integration; plan unchanged")
+        worker_entry(plan, worker_id)["landed"] = {"pr_url": url, "head_sha": sha, "merge_commit_sha": merge}
+    pending = pending_workers(plan, args.repo, order, present)
+    path = Path(args.plan)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(plan, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    print(f"Reconciled verified merge evidence; {len(pending)} worker revisions remain pending.")
 
 
 def cmd_create_integration(args):
@@ -480,6 +612,11 @@ conflicts.add_argument("plan")
 conflicts.add_argument("--repo", required=True)
 conflicts.add_argument("--no-fetch", action="store_true")
 conflicts.set_defaults(run=cmd_conflicts)
+
+reconcile = commands.add_parser("reconcile", help="verify legacy merged PRs and atomically record landed revisions")
+reconcile.add_argument("plan")
+reconcile.add_argument("--repo", required=True)
+reconcile.set_defaults(run=cmd_reconcile)
 
 create = commands.add_parser("create-integration", help="create the integration branch on GitHub from base")
 create.add_argument("plan")

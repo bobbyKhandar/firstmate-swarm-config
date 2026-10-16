@@ -33,7 +33,7 @@ flowchart TD
     MG --> X{"Does the next merge conflict?"}
     X -- Yes --> HLP["Conflict helper, gpt-6.1-sol high<br/>Reads every side, pushes name-resolve-N"]
     HLP --> R
-    X -- No --> N{"All workers merged?"}
+    X -- No --> N{"All revisions accounted for?"}
     N -- No --> R
     N -- Yes --> FPR["Manager opens PR name into main<br/>Reports it to you"]
     FPR --> Y{"You merge into main?"}
@@ -75,7 +75,26 @@ How the same file can be edited twice:
 - **The branch is the saved copy.** Each worker's result is the GitHub branch `<name>-worker-N`, created fresh from the integration branch. The PC checkout is scratch the coding CLI needs. A worker is not done until that branch is pushed.
 - **Shared edits are allowed.** `owns` in the plan file records where a worker expects to work. It may be empty, and two workers may list the same path. `bin/swarm-branches check` rejects dependency cycles and prints shared paths; it does not reject them.
 - **Conflicts are a separate task.** `bin/swarm-branches conflicts` tries the merges with `git merge-tree` (no checkout) and prints every worker's edit of each conflicted file. The conflict helper is Codex `gpt-6.1-sol` at high reasoning. It keeps each intended behavior, pushes a fresh `<name>-resolve-N` branch, and opens a PR into the integration branch. The manager reviews that PR and does not edit it. A rejected resolution is relaunched at `gpt-6.1-sol` extra-high.
-- **One merge at a time.** Clean merges go through Firstmate's `bin/fm-pr-merge.sh`, which refuses unless the PR is mergeable, conflict-free, and green at its exact head. Workers do not resolve each other's conflicts, rebase a pushed branch, or force-push.
+- **One merge at a time.** Worker and resolution PRs use merge commits through Firstmate's `bin/fm-pr-merge.sh <worker> <pr-url> -- --merge`, which refuses unless the PR is mergeable, conflict-free, and green at its exact head. Workers do not resolve each other's conflicts, rebase a pushed branch, or force-push.
+
+### Merge history and existing tasks
+
+Merge commits are required for worker and resolution PRs entering integration. Check the project's merge policy at intake and stop if they are prohibited; do not silently squash. The final integration PR into `main` can still be squashed by you.
+
+Before resuming an existing task, and after each real merge, run:
+
+```sh
+bin/swarm-branches reconcile PLAN --repo CLONE
+bin/swarm-branches conflicts PLAN --repo CLONE
+```
+
+`reconcile` checks the clone's origin against the plan, reads merged GitHub PRs, verifies each PR's repository, integration base, exact source head and merge-commit ancestry, and atomically saves an optional worker `landed` record (`pr_url`, `head_sha`, `merge_commit_sha`). This supports tasks whose worker PRs were already squash-merged without rewriting history. Ambiguous PR matches, moved heads, unavailable GitHub data, or stale records block reconciliation and leave the plan unchanged. Existing plans need no schema migration. Missing branches without verified landed evidence block completion. Keep plan records in trusted task storage: offline checks trust previously verified records and cannot establish their provenance.
+
+`conflicts` skips accounted revisions and simulates pending merges with both parents preserved. Its NUL-delimited Git path handling retains spaces and unusual filenames; reports quote control characters and include integration-side and pending-worker diffs, including binary/deletion evidence. Exit 1 means a conflict or an incomplete/invalid task; exit 0 means either clean pending merges or all revisions accounted for, as stated in the output. Neither result substitutes for manager acceptance or integration tests. `overlap` only considers pending workers.
+
+If the report lists a clean prefix, merge those approved PRs first and refresh it. The conflict helper must start an unused `<name>-resolve-N` from current integration, merge the conflicting reviewed worker head, resolve the conflict, and preserve both parents. After review, merge its PR with `-- --merge`. Verify the original worker head is now an ancestor of integration, then comment on and close its original PR as superseded if still open, linking the resolution PR. Every accepted revision must be accounted for before final delivery; an original PR superseded this way need not itself be merged.
+
+`--no-fetch` uses only local remote-tracking refs and existing landed records; it neither contacts GitHub nor creates new merge evidence. Suggested resolution names in that mode are local hints: check origin again before pushing.
 
 All agents share your GitHub login, and GitHub does not let an account approve or request changes on its own pull request, so verdicts are PR comments (`Manager review: APPROVED at <sha>`) rather than formal reviews. For the same reason GitHub cannot tell the agents' merges from yours: a branch rule on `main` that requires a pull request stops direct pushes, but only a separate GitHub account for the swarm, plus a rule requiring your approval on `main`, enforces that only you merge into it.
 
@@ -168,7 +187,7 @@ Cursor is excluded from automatic routing by default. Add a route only after ver
 | `bin/swarm-branches` | Creates the plan and integration branch, allows shared paths, and prints every side of a merge conflict. |
 | `bin/check-setup.py` | The configuration, pin, and route checks behind `./swarm --check`. |
 | `tests/run.sh` | Fixture tests with stub CLIs; set `UPSTREAM_BOOTSTRAP` to a pinned `bin/fm-bootstrap.sh` to also run Firstmate's own dispatch validator. |
-| `.github/workflows/ci.yml` | Runs ShellCheck, the Python compile check, the manifest check, and the fixture tests on every push. |
+| `.github/workflows/ci.yml` | Runs ShellCheck, the Python compile check, the manifest check, and the fixture tests on every push and pull request. |
 
 Settings are copied into `home/` during setup. Changes later made there are ignored by Git: copy intended, sanitized changes back into `settings/` before committing them. Review model and account claims for your machine before dispatching work.
 
@@ -178,7 +197,7 @@ Firstmate remains a separate upstream project with its own license and update pr
 
 ## Verification
 
-CI runs ShellCheck, a Python compile check, `python3 bin/manifest.py check`, and `bash tests/run.sh`, which exercises the launcher, `--check`, the manager approval switch, the OpenCode helper, and `bin/swarm-branches` against stub CLIs, and validates the dispatch file with the pinned Firstmate's own validator. Run the same tests locally with `bash tests/run.sh`. These checks do not establish a complete project workflow or every account's access to the configured models.
+CI runs ShellCheck, a Python compile check, `python3 bin/manifest.py check`, and `bash tests/run.sh`, which exercises the launcher, `--check`, the manager approval switch, the OpenCode helper, and `bin/swarm-branches` against stub CLIs, and validates the dispatch file with the pinned Firstmate's own validator. It also runs real local Git regressions for merge ancestry, legacy reconciliation, and unusual filenames. CI fetches the exact manifest pin and fails if upstream validation is unavailable. Run the same tests locally with `bash tests/run.sh`. These checks do not establish a complete project workflow or every account's access to the configured models.
 
 Before relying on the swarm workflow, run one small task that uses several workers, not a pair, in a test repository and confirm each step:
 
@@ -187,7 +206,7 @@ Before relying on the swarm workflow, run one small task that uses several worke
 3. The integration branch appears on GitHub, created from `main`.
 4. Each worker pushes `<name>-worker-N` and opens its PR into the integration branch, not `main`.
 5. The manager posts a `Manager review:` verdict on each PR; a `CHANGES REQUESTED` round produces new commits and a new review.
-6. Approved PRs merge one at a time into the integration branch. A conflicting merge is given to the conflict helper, which pushes `<name>-resolve-N` after reading every side.
+6. Approved worker and resolution PRs merge one at a time with merge commits. Reconciliation and conflict checks account for every accepted revision. A conflict helper preserves both parent histories and the original PR is linked and closed as superseded when necessary.
 7. The manager opens a PR from the integration branch into `main`, reports it, and does not merge it.
 8. Nothing was force-pushed, and nothing landed on `main` without you.
 

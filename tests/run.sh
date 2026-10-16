@@ -255,6 +255,9 @@ check "create-integration did not post" '! grep -q "POST" "$GH_LOG"'
 expect "create-integration creates the branch from base" 0 "Created login at 0123456789ab" "$SB" create-integration "$plans/login.json"
 check "create-integration posts the right ref" 'grep -q "POST repos/acme/app/git/refs -f ref=refs/heads/login -f sha=0123456789abcdef0123456789abcdef01234567" "$GH_LOG"'
 
+echo "# real Git merge and reconciliation regressions"
+expect "branch regressions" 0 "OK" python3 "$ROOT/tests/branches.py"
+
 echo "# manifest and dispatch"
 expect "manifest matches the tracked files" 0 "Manifest matches" python3 "$ROOT/bin/manifest.py" check
 if [[ -n "${UPSTREAM_BOOTSTRAP:-}" ]]; then
