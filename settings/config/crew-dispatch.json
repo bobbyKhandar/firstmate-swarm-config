@@ -39,7 +39,7 @@
       "why": "Implementation uses GPT-6 Luna with explicit xhigh reasoning after planning has removed architectural ambiguity."
     },
     {
-      "when": "The task is an additional independent review explicitly requested or justified by the change, ambiguous debugging, or implementation that the manager has explicitly escalated after the execution worker attempt was inadequate. Routine acceptance code review is performed by the medium-reasoning manager itself and is not a worker assignment. Unresolved architectural planning decisions belong to the planning rule.",
+      "when": "The task is an additional independent review that the captain explicitly requested or the change justifies. Routine acceptance review of worker PRs is performed by the medium-reasoning manager itself and is not a worker assignment.",
       "use": [
         {
           "harness": "claude",
@@ -52,7 +52,29 @@
           "effort": "medium"
         }
       ],
-      "why": "Use medium reasoning for an additional review or a demonstrated need. An extra reviewer assists rather than replaces the manager's personal code review; return architectural uncertainty to the high-tier planner."
+      "why": "An extra reviewer assists rather than replaces the manager's own review; return architectural uncertainty to the high-tier planner."
+    },
+    {
+      "when": "First escalation: the manager rejected a GPT-6 Luna xhigh worker's attempt at implementation or debugging, or the same finding survived two CHANGES REQUESTED rounds.",
+      "use": [
+        {
+          "harness": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        }
+      ],
+      "why": "Move up one model tier at high reasoning. Relaunch the same task so it keeps its worktree, branch, and PR."
+    },
+    {
+      "when": "Second escalation: the gpt-6.1-sol high attempt at the same task was also rejected or left the same finding unresolved after two CHANGES REQUESTED rounds.",
+      "use": [
+        {
+          "harness": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "xhigh"
+        }
+      ],
+      "why": "Last step of the escalation ladder. If this attempt is also inadequate, report to the captain instead of retrying."
     }
   ],
   "default": [
