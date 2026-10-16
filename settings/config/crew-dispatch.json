@@ -55,6 +55,17 @@
       "why": "An extra reviewer assists rather than replaces the manager's own review; return architectural uncertainty to the high-tier planner."
     },
     {
+      "when": "The task is a conflict helper: merging a worker branch into the integration branch conflicts because workers edited the same code. Read every worker's version of each conflicted region, keep each intended behavior, and push one resolution.",
+      "use": [
+        {
+          "harness": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        }
+      ],
+      "why": "One worker cannot see the other workers' edits. The helper reads all sides and writes the resolution on a fresh GitHub branch."
+    },
+    {
       "when": "First escalation: the manager rejected a GPT-6 Luna xhigh worker's attempt at implementation or debugging, or the same finding survived two CHANGES REQUESTED rounds.",
       "use": [
         {
