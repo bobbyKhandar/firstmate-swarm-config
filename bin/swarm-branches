@@ -2,13 +2,15 @@
 """Plan, check, and stage the branches of one swarm task.
 
 A swarm task has one integration branch <prefix><name> and workers
-<name>-worker-1..N on branches <prefix><name>-worker-N. Each worker owns an
-exclusive set of repository paths recorded in a JSON plan file.
+<name>-worker-1..N on branches <prefix><name>-worker-N. Those GitHub branches
+are the saved copy of the work. Workers may edit the same file. owns records
+where a worker expects to work; it is not an exclusive lock.
 
   init PLAN --project OWNER/REPO --name NAME --workers N [--prefix P] [--base B]
   check PLAN
   boundary PLAN WORKER (--repo CLONE [--no-fetch] | --files FILE)
   overlap PLAN --repo CLONE [--no-fetch]
+  conflicts PLAN --repo CLONE [--no-fetch]
   create-integration PLAN
 """
 import argparse
@@ -134,9 +136,9 @@ def validate(plan):
             problems.append(f"duplicate worker id: {worker_id}")
         if not valid_ref(branch(plan, worker_id)):
             problems.append(f"{worker_id}: branch is not a valid branch name: {branch(plan, worker_id)}")
-        paths = worker.get("owns")
-        if not isinstance(paths, list) or not paths:
-            problems.append(f"{worker_id}: owns must list at least one file or directory")
+        paths = worker.get("owns", [])
+        if not isinstance(paths, list):
+            problems.append(f"{worker_id}: owns must be a list of files or directories, or empty")
             paths = []
         normalized = []
         for entry in paths:
@@ -156,16 +158,6 @@ def validate(plan):
             elif dependency not in ids:
                 problems.append(f"{worker_id}: depends on unknown worker {dependency!r}")
 
-    names = sorted(owned, key=worker_number)
-    for position, first in enumerate(names):
-        for second in names[position + 1:]:
-            for left in owned[first]:
-                for right in owned[second]:
-                    if overlaps(left, right):
-                        problems.append(
-                            f"ownership overlap: {first} owns {left} and {second} owns {right}; "
-                            "give the path to one worker and make the other depend on it"
-                        )
     if problems:
         return problems, []
 
@@ -201,11 +193,38 @@ def worker_entry(plan, worker_id):
 
 
 def owned_paths(worker):
-    return [normalize(entry)[0] for entry in worker["owns"]]
+    return [normalize(entry)[0] for entry in worker.get("owns") or []]
 
 
-def git(repo, *args):
-    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+def shared_claims(plan):
+    claims = []
+    workers = [worker for worker in plan["workers"] if isinstance(worker, dict) and worker.get("id")]
+    for position, first in enumerate(workers):
+        for second in workers[position + 1:]:
+            for left in owned_paths(first):
+                for right in owned_paths(second):
+                    if overlaps(left, right):
+                        claims.append((left, right, first["id"], second["id"]))
+    return claims
+
+
+def git(repo, *args, identity=False):
+    command = ["git", "-C", repo]
+    if identity:
+        command += ["-c", "user.email=swarm-conflicts@localhost", "-c", "user.name=swarm-conflicts"]
+    return subprocess.run([*command, *args], capture_output=True, text=True)
+
+
+CONFLICT_PATH = re.compile(r"^CONFLICT \([^)]+\): (?:Merge conflict in )?(\S+)")
+
+
+def conflicted_paths(output):
+    found = []
+    for line in output.splitlines():
+        match = CONFLICT_PATH.match(line.strip())
+        if match and match.group(1) not in found:
+            found.append(match.group(1))
+    return found
 
 
 def remote_branches(repo, names, fetch):
@@ -268,7 +287,8 @@ def cmd_init(args):
     path.write_text(json.dumps(plan, indent=2) + "\n")
     print(f"Created {path}: integration {integration(plan)}, workers "
           f"{', '.join(branch(plan, worker_id) for worker_id in worker_ids(plan))}.")
-    print("Fill each worker's owns (and depends_on), then run: swarm-branches check " + str(path))
+    print("Record where each worker expects to work. Shared paths are allowed. "
+          "Then run: swarm-branches check " + str(path))
 
 
 def cmd_check(args):
@@ -278,11 +298,18 @@ def cmd_check(args):
     print("Merge order:")
     for position, worker_id in enumerate(order, 1):
         worker = worker_entry(plan, worker_id)
-        line = f"  {position}. {worker_id} on {branch(plan, worker_id)} owns {', '.join(owned_paths(worker))}"
+        owned = owned_paths(worker)
+        line = f"  {position}. {worker_id} on {branch(plan, worker_id)} works in {', '.join(owned) if owned else 'any path'}"
         if worker.get("depends_on"):
             line += f"; after {', '.join(worker['depends_on'])}"
         print(line)
-    print("Plan valid.")
+    claims = shared_claims(plan)
+    if claims:
+        print("Shared paths (workers may edit these; a conflict helper resolves real merge conflicts):")
+        for left, right, first, second in claims:
+            same = left if left == right else f"{left} and {right}"
+            print(f"  {same}: {first}, {second}")
+    print("Plan valid. Saved work is the GitHub branch, not a checkout on the PC.")
 
 
 def cmd_boundary(args):
@@ -300,6 +327,9 @@ def cmd_boundary(args):
                 fail(f"branch {name} is not on origin yet")
         files = changed_files(args.repo, integration(plan), head)
     mine = owned_paths(worker)
+    if not mine:
+        print(f"{args.worker} has no declared paths; it may edit any file. Changed paths checked: {len(files)}.")
+        return
     outside = [path for path in files if not any(covers(owned, path) for owned in mine)]
     if not outside:
         print(f"{args.worker} stayed within its boundary; changed paths checked: {len(files)}.")
@@ -329,10 +359,65 @@ def cmd_overlap(args):
     if not shared:
         print("No file is changed by more than one open worker branch.")
         return
-    print("Files changed by more than one open worker branch (merge these one at a time):")
+    print("Files changed by more than one open worker branch:")
     for path, ids in shared.items():
         print(f"  {path}: {', '.join(ids)}")
-    sys.exit(1)
+    print("Shared edits are allowed. Run: swarm-branches conflicts " + args.plan)
+
+
+def cmd_conflicts(args):
+    """Report a real merge conflict, with every worker's edit of those files.
+
+    Uses git merge-tree, so it does not check out the project. It may write a
+    dangling commit in the clone while it stacks clean merges; it does not
+    move any branch.
+    """
+    plan = load(args.plan)
+    order = require_valid(plan)
+    heads = [branch(plan, worker_id) for worker_id in order]
+    present = remote_branches(args.repo, [integration(plan), *heads], not args.no_fetch)
+    if integration(plan) not in present:
+        fail(f"branch {integration(plan)} is not on origin yet")
+    touched = {}
+    for worker_id, head in zip(order, heads):
+        if head not in present:
+            continue
+        for path in changed_files(args.repo, integration(plan), head):
+            touched.setdefault(path, []).append(worker_id)
+    current = f"origin/{integration(plan)}"
+    for worker_id, head in zip(order, heads):
+        if head not in present:
+            print(f"{worker_id}: {head} is not on origin yet; skipped")
+            continue
+        merged = git(args.repo, "merge-tree", "--write-tree", "--name-only", current, f"origin/{head}")
+        if merged.returncode == 0:
+            tree = next((line.strip() for line in merged.stdout.splitlines() if line.strip()), "")
+            parent = git(args.repo, "rev-parse", current)
+            made = git(args.repo, "commit-tree", tree, "-p", parent.stdout.strip(),
+                       "-m", f"swarm-conflicts {worker_id}", identity=True)
+            if parent.returncode or made.returncode or not re.fullmatch(r"[0-9a-f]{40}", made.stdout.strip()):
+                fail(f"could not stack a clean merge of {head}: {(made.stderr or merged.stderr).strip()}")
+            current = made.stdout.strip()
+            continue
+        if merged.returncode != 1:
+            fail(f"could not try merging {head}: {merged.stderr.strip()}")
+        paths = conflicted_paths(merged.stdout)
+        print(f"Conflict merging {head} into the integration result:")
+        if not paths:
+            print(merged.stdout.strip())
+        for path in paths:
+            editors = touched.get(path, [worker_id])
+            print(f"  {path}: {', '.join(editors)}")
+            for editor in editors:
+                diff = git(args.repo, "diff", "--unified=3",
+                           f"origin/{integration(plan)}...origin/{branch(plan, editor)}", "--", path)
+                print(f"--- {editor} changed {path} relative to {integration(plan)} ---")
+                print(diff.stdout.rstrip() or "(no textual diff; the file may have been renamed or deleted)")
+        resolve = f"{integration(plan)}-resolve-1"
+        print(f"Dispatch the conflict helper. It reads every side above, pushes a fresh branch {resolve}, "
+              f"and opens a PR into {integration(plan)}. The saved resolution is that GitHub branch.")
+        sys.exit(1)
+    print("No merge conflicts. Worker branches can merge into the integration branch in order.")
 
 
 def gh(*args):
@@ -389,6 +474,12 @@ overlap.add_argument("plan")
 overlap.add_argument("--repo", required=True)
 overlap.add_argument("--no-fetch", action="store_true")
 overlap.set_defaults(run=cmd_overlap)
+
+conflicts = commands.add_parser("conflicts", help="show merge conflicts and every worker's side")
+conflicts.add_argument("plan")
+conflicts.add_argument("--repo", required=True)
+conflicts.add_argument("--no-fetch", action="store_true")
+conflicts.set_defaults(run=cmd_conflicts)
 
 create = commands.add_parser("create-integration", help="create the integration branch on GitHub from base")
 create.add_argument("plan")
