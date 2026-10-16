@@ -1,0 +1,398 @@
+#!/usr/bin/env python3
+"""Plan, check, and stage the branches of one swarm task.
+
+A swarm task has one integration branch <prefix><name> and workers
+<name>-worker-1..N on branches <prefix><name>-worker-N. Each worker owns an
+exclusive set of repository paths recorded in a JSON plan file.
+
+  init PLAN --project OWNER/REPO --name NAME --workers N [--prefix P] [--base B]
+  check PLAN
+  boundary PLAN WORKER (--repo CLONE [--no-fetch] | --files FILE)
+  overlap PLAN --repo CLONE [--no-fetch]
+  create-integration PLAN
+"""
+import argparse
+import json
+from pathlib import Path, PurePosixPath
+import re
+import subprocess
+import sys
+
+TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+PROJECT = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+WORKER_SUFFIX = re.compile(r"-worker-([1-9][0-9]*)")
+
+
+def fail(message):
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load(path):
+    try:
+        return json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        fail(f"plan not found: {path}")
+    except ValueError as error:
+        fail(f"plan is not valid JSON: {path}: {error}")
+
+
+def prefix(plan):
+    return plan.get("branch_prefix", "")
+
+
+def integration(plan):
+    return prefix(plan) + plan["name"]
+
+
+def branch(plan, worker_id):
+    return prefix(plan) + worker_id
+
+
+def valid_ref(name):
+    return subprocess.run(
+        ["git", "check-ref-format", "--branch", name], capture_output=True,
+    ).returncode == 0
+
+
+def normalize(entry):
+    if not isinstance(entry, str) or not entry.strip():
+        return None, "must be a non-empty string"
+    if any(char in entry for char in "*?["):
+        return None, "globs are not supported; list files or directories"
+    path = PurePosixPath(entry)
+    if path.is_absolute() or ".." in path.parts:
+        return None, "must be relative to the repository root without '..'"
+    parts = [part for part in path.parts if part != "."]
+    if not parts:
+        return None, "must name a file or directory below the repository root"
+    return "/".join(parts), None
+
+
+def covers(owned, changed):
+    return changed == owned or changed.startswith(owned + "/")
+
+
+def overlaps(first, second):
+    return covers(first, second) or covers(second, first)
+
+
+def worker_number(worker_id):
+    match = WORKER_SUFFIX.search(worker_id)
+    return int(match.group(1)) if match else 0
+
+
+def validate_names(plan, problems):
+    name = plan.get("name")
+    if not isinstance(name, str) or not TASK_ID.fullmatch(name) or len(name) > 54:
+        problems.append("name must be 1-54 characters of letters, digits, '.', '_' or '-'")
+        return False
+    if not isinstance(plan.get("project"), str) or not PROJECT.fullmatch(plan["project"]):
+        problems.append("project must be OWNER/REPO")
+    base = plan.get("base")
+    if not isinstance(base, str) or not valid_ref(base):
+        problems.append("base must be a valid branch name")
+    branch_prefix = prefix(plan)
+    if not isinstance(branch_prefix, str) or " " in branch_prefix or branch_prefix.startswith("-"):
+        problems.append("branch_prefix must be a string without spaces that does not start with '-'")
+        return False
+    if not valid_ref(integration(plan)):
+        problems.append(f"integration branch is not a valid branch name: {integration(plan)}")
+    if base == integration(plan):
+        problems.append("the integration branch must differ from base")
+    return True
+
+
+def worker_ids(plan):
+    return [worker.get("id") for worker in plan.get("workers", []) if isinstance(worker, dict)]
+
+
+def validate(plan):
+    problems = []
+    if not isinstance(plan, dict):
+        return ["plan must be a JSON object"], []
+    if not validate_names(plan, problems):
+        return problems, []
+    workers = plan.get("workers")
+    if not isinstance(workers, list) or not workers:
+        return problems + ["workers must be a non-empty list"], []
+
+    ids = worker_ids(plan)
+    owned = {}
+    for index, worker in enumerate(workers, 1):
+        if not isinstance(worker, dict):
+            problems.append(f"worker {index} must be an object")
+            continue
+        worker_id = worker.get("id")
+        expected = re.compile(re.escape(plan["name"]) + WORKER_SUFFIX.pattern)
+        if not isinstance(worker_id, str) or not expected.fullmatch(worker_id):
+            problems.append(f"worker {index} id must be {plan['name']}-worker-<n>")
+            continue
+        if not TASK_ID.fullmatch(worker_id):
+            problems.append(f"{worker_id}: task ids are limited to 64 characters")
+        if ids.count(worker_id) > 1:
+            problems.append(f"duplicate worker id: {worker_id}")
+        if not valid_ref(branch(plan, worker_id)):
+            problems.append(f"{worker_id}: branch is not a valid branch name: {branch(plan, worker_id)}")
+        paths = worker.get("owns")
+        if not isinstance(paths, list) or not paths:
+            problems.append(f"{worker_id}: owns must list at least one file or directory")
+            paths = []
+        normalized = []
+        for entry in paths:
+            path, error = normalize(entry)
+            if error:
+                problems.append(f"{worker_id}: owned path {entry!r} {error}")
+            else:
+                normalized.append(path)
+        owned[worker_id] = sorted(set(normalized))
+        dependencies = worker.get("depends_on", [])
+        if not isinstance(dependencies, list):
+            problems.append(f"{worker_id}: depends_on must be a list of worker ids")
+            continue
+        for dependency in dependencies:
+            if dependency == worker_id:
+                problems.append(f"{worker_id}: cannot depend on itself")
+            elif dependency not in ids:
+                problems.append(f"{worker_id}: depends on unknown worker {dependency!r}")
+
+    names = sorted(owned, key=worker_number)
+    for position, first in enumerate(names):
+        for second in names[position + 1:]:
+            for left in owned[first]:
+                for right in owned[second]:
+                    if overlaps(left, right):
+                        problems.append(
+                            f"ownership overlap: {first} owns {left} and {second} owns {right}; "
+                            "give the path to one worker and make the other depend on it"
+                        )
+    if problems:
+        return problems, []
+
+    remaining = {worker["id"]: set(worker.get("depends_on", [])) for worker in workers}
+    order = []
+    while remaining:
+        ready = sorted((worker_id for worker_id, deps in remaining.items() if not deps), key=worker_number)
+        if not ready:
+            cycle = ", ".join(sorted(remaining, key=worker_number))
+            return [f"dependency cycle among: {cycle}"], []
+        for worker_id in ready:
+            order.append(worker_id)
+            del remaining[worker_id]
+        for deps in remaining.values():
+            deps.difference_update(ready)
+    return [], order
+
+
+def require_valid(plan):
+    problems, order = validate(plan)
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    if problems:
+        fail("plan is invalid")
+    return order
+
+
+def worker_entry(plan, worker_id):
+    for worker in plan["workers"]:
+        if worker["id"] == worker_id:
+            return worker
+    fail(f"unknown worker {worker_id!r}; known: {', '.join(worker_ids(plan))}")
+
+
+def owned_paths(worker):
+    return [normalize(entry)[0] for entry in worker["owns"]]
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def remote_branches(repo, names, fetch):
+    if not fetch:
+        return [name for name in names
+                if git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{name}").returncode == 0]
+    present = []
+    for name in names:
+        listed = git(repo, "ls-remote", "--exit-code", "origin", f"refs/heads/{name}")
+        if listed.returncode == 0:
+            present.append(name)
+        elif listed.returncode != 2:
+            fail(f"could not read origin in {repo}: {listed.stderr.strip()}")
+    if present:
+        refspecs = [f"+refs/heads/{name}:refs/remotes/origin/{name}" for name in present]
+        fetched = git(repo, "fetch", "--quiet", "origin", *refspecs)
+        if fetched.returncode:
+            fail(f"git fetch failed in {repo}: {fetched.stderr.strip()}")
+    return present
+
+
+def changed_files(repo, base_branch, head_branch):
+    diff = git(repo, "diff", "--name-only", "--no-renames",
+               f"origin/{base_branch}...origin/{head_branch}")
+    if diff.returncode:
+        fail(f"could not diff {head_branch} against {base_branch}: {diff.stderr.strip()}")
+    return [line for line in diff.stdout.splitlines() if line]
+
+
+def owner_of(plan, path):
+    for worker in plan["workers"]:
+        if any(covers(owned, path) for owned in owned_paths(worker)):
+            return worker["id"]
+    return None
+
+
+def cmd_init(args):
+    path = Path(args.plan)
+    if path.exists():
+        fail(f"plan already exists: {path}")
+    if args.workers < 1:
+        fail("--workers must be at least 1")
+    plan = {
+        "project": args.project,
+        "name": args.name,
+        "base": args.base,
+        "branch_prefix": args.prefix,
+        "workers": [
+            {"id": f"{args.name}-worker-{number}", "owns": [], "depends_on": []}
+            for number in range(1, args.workers + 1)
+        ],
+    }
+    problems = []
+    validate_names(plan, problems)
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    if problems:
+        fail("cannot create plan")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(plan, indent=2) + "\n")
+    print(f"Created {path}: integration {integration(plan)}, workers "
+          f"{', '.join(branch(plan, worker_id) for worker_id in worker_ids(plan))}.")
+    print("Fill each worker's owns (and depends_on), then run: swarm-branches check " + str(path))
+
+
+def cmd_check(args):
+    plan = load(args.plan)
+    order = require_valid(plan)
+    print(f"Integration branch {integration(plan)} from {plan['base']} in {plan['project']}.")
+    print("Merge order:")
+    for position, worker_id in enumerate(order, 1):
+        worker = worker_entry(plan, worker_id)
+        line = f"  {position}. {worker_id} on {branch(plan, worker_id)} owns {', '.join(owned_paths(worker))}"
+        if worker.get("depends_on"):
+            line += f"; after {', '.join(worker['depends_on'])}"
+        print(line)
+    print("Plan valid.")
+
+
+def cmd_boundary(args):
+    plan = load(args.plan)
+    require_valid(plan)
+    worker = worker_entry(plan, args.worker)
+    if args.files:
+        text = sys.stdin.read() if args.files == "-" else Path(args.files).read_text()
+        files = [line.strip() for line in text.splitlines() if line.strip()]
+    else:
+        head = branch(plan, args.worker)
+        present = remote_branches(args.repo, [integration(plan), head], not args.no_fetch)
+        for name in (integration(plan), head):
+            if name not in present:
+                fail(f"branch {name} is not on origin yet")
+        files = changed_files(args.repo, integration(plan), head)
+    mine = owned_paths(worker)
+    outside = [path for path in files if not any(covers(owned, path) for owned in mine)]
+    if not outside:
+        print(f"{args.worker} stayed within its boundary; changed paths checked: {len(files)}.")
+        return
+    print(f"{args.worker} changed {len(outside)} paths outside its boundary:")
+    for path in outside:
+        owner = owner_of(plan, path)
+        print(f"  {path} (owned by {owner})" if owner else f"  {path} (owned by no worker)")
+    sys.exit(1)
+
+
+def cmd_overlap(args):
+    plan = load(args.plan)
+    order = require_valid(plan)
+    heads = [branch(plan, worker_id) for worker_id in order]
+    present = remote_branches(args.repo, [integration(plan), *heads], not args.no_fetch)
+    if integration(plan) not in present:
+        fail(f"branch {integration(plan)} is not on origin yet")
+    touched = {}
+    for worker_id, head in zip(order, heads):
+        if head not in present:
+            print(f"{worker_id}: {head} is not on origin yet; skipped")
+            continue
+        for path in changed_files(args.repo, integration(plan), head):
+            touched.setdefault(path, []).append(worker_id)
+    shared = {path: ids for path, ids in sorted(touched.items()) if len(ids) > 1}
+    if not shared:
+        print("No file is changed by more than one open worker branch.")
+        return
+    print("Files changed by more than one open worker branch (merge these one at a time):")
+    for path, ids in shared.items():
+        print(f"  {path}: {', '.join(ids)}")
+    sys.exit(1)
+
+
+def gh(*args):
+    return subprocess.run(["gh", *args], capture_output=True, text=True)
+
+
+def cmd_create_integration(args):
+    plan = load(args.plan)
+    require_valid(plan)
+    project, target = plan["project"], integration(plan)
+    existing = gh("api", f"repos/{project}/git/ref/heads/{target}", "--jq", ".object.sha")
+    if existing.returncode == 0:
+        fail(f"{target} already exists in {project} at {existing.stdout.strip()}; refusing to move it")
+    base = gh("api", f"repos/{project}/git/ref/heads/{plan['base']}", "--jq", ".object.sha")
+    sha = base.stdout.strip()
+    if base.returncode or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        fail(f"could not read {plan['base']} in {project}: {base.stderr.strip() or base.stdout.strip()}")
+    created = gh("api", "-X", "POST", f"repos/{project}/git/refs",
+                 "-f", f"ref=refs/heads/{target}", "-f", f"sha={sha}")
+    if created.returncode:
+        fail(f"could not create {target} in {project}: {created.stderr.strip()}")
+    print(f"Created {target} at {sha} from {plan['base']} in {project}.")
+
+
+parser = argparse.ArgumentParser(
+    prog="swarm-branches", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+)
+commands = parser.add_subparsers(dest="command", required=True)
+
+init = commands.add_parser("init", help="create a plan skeleton")
+init.add_argument("plan")
+init.add_argument("--project", required=True, help="OWNER/REPO on GitHub")
+init.add_argument("--name", required=True, help="integration branch name without prefix")
+init.add_argument("--workers", type=int, required=True)
+init.add_argument("--prefix", default="", help="branch prefix; empty gives exactly NAME and NAME-worker-N")
+init.add_argument("--base", default="main")
+init.set_defaults(run=cmd_init)
+
+check = commands.add_parser("check", help="validate names, ownership, and dependencies")
+check.add_argument("plan")
+check.set_defaults(run=cmd_check)
+
+boundary = commands.add_parser("boundary", help="list a worker's changes outside its owned paths")
+boundary.add_argument("plan")
+boundary.add_argument("worker")
+source = boundary.add_mutually_exclusive_group(required=True)
+source.add_argument("--repo", help="local clone whose origin is the project")
+source.add_argument("--files", help="newline-separated changed paths, or - for stdin")
+boundary.add_argument("--no-fetch", action="store_true")
+boundary.set_defaults(run=cmd_boundary)
+
+overlap = commands.add_parser("overlap", help="list files changed by more than one worker branch")
+overlap.add_argument("plan")
+overlap.add_argument("--repo", required=True)
+overlap.add_argument("--no-fetch", action="store_true")
+overlap.set_defaults(run=cmd_overlap)
+
+create = commands.add_parser("create-integration", help="create the integration branch on GitHub from base")
+create.add_argument("plan")
+create.set_defaults(run=cmd_create_integration)
+
+parsed = parser.parse_args()
+parsed.run(parsed)
