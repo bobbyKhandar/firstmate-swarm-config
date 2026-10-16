@@ -194,7 +194,7 @@ expect "init names the integration and worker branches" 0 "integration login, wo
 expect "init refuses to overwrite a plan" 1 "plan already exists" "$SB" init "$plans/login.json" --project acme/app --name login --workers 2
 expect "init rejects a name with a space" 1 "name must be" "$SB" init "$plans/bad.json" --project acme/app --name "bad name" --workers 1
 expect "init with a prefix" 0 "integration fm/login" "$SB" init "$plans/prefixed.json" --project acme/app --name login --workers 1 --prefix fm/
-expect "check requires owned paths" 1 "owns must list at least one" "$SB" check "$plans/login.json"
+expect "check allows workers with no declared paths" 0 "works in any path" "$SB" check "$plans/login.json"
 set_plan() {
   python3 - "$1" "$2" <<'PY'
 import json, sys
@@ -205,10 +205,10 @@ json.dump(plan, open(path, "w"), indent=2)
 PY
 }
 set_plan "$plans/login.json" 'w = plan["workers"]; w[0]["owns"] = ["src/auth", "package.json"]; w[1]["owns"] = ["src/ui/"]; w[1]["depends_on"] = ["login-worker-1"]'
-expect "check prints the merge order" 0 "2. login-worker-2 on login-worker-2 owns src/ui; after login-worker-1" "$SB" check "$plans/login.json"
+expect "check prints the merge order" 0 "2. login-worker-2 on login-worker-2 works in src/ui; after login-worker-1" "$SB" check "$plans/login.json"
 cp "$plans/login.json" "$plans/overlap.json"
 set_plan "$plans/overlap.json" 'plan["workers"][1]["owns"] = ["src/auth/session.ts"]'
-expect "check rejects overlapping ownership" 1 "ownership overlap: login-worker-1 owns src/auth and login-worker-2 owns src/auth/session.ts" "$SB" check "$plans/overlap.json"
+expect "check allows a shared path" 0 "src/auth and src/auth/session.ts: login-worker-1, login-worker-2" "$SB" check "$plans/overlap.json"
 cp "$plans/login.json" "$plans/cycle.json"
 set_plan "$plans/cycle.json" 'plan["workers"][0]["depends_on"] = ["login-worker-2"]'
 expect "check rejects dependency cycles" 1 "dependency cycle" "$SB" check "$plans/cycle.json"
@@ -239,7 +239,13 @@ expect "boundary flags another worker's file" 1 "package.json (owned by login-wo
 expect "boundary flags a file moved out of another worker's area" 1 "src/auth/a.ts (owned by login-worker-1)" "$SB" boundary "$plans/login.json" login-worker-2 --repo "$repo"
 expect "boundary reads a file list from stdin" 1 "README.md (owned by no worker)" \
   bash -c 'printf "src/ui/x.ts\nREADME.md\n" | "$0" boundary "$1" login-worker-2 --files -' "$SB" "$plans/login.json"
-expect "overlap lists files changed by two workers" 1 "src/auth/a.ts: login-worker-1, login-worker-2" "$SB" overlap "$plans/login.json" --repo "$repo"
+expect "overlap lists files changed by two workers" 0 "src/auth/a.ts: login-worker-1, login-worker-2" "$SB" overlap "$plans/login.json" --repo "$repo"
+git -C "$repo" checkout -q one
+echo '{"b":2}' > "$repo/package.json"
+git -C "$repo" commit -qam both
+git -C "$repo" push -q origin HEAD:refs/heads/login-worker-1
+expect "conflicts shows every side of a real merge conflict" 1 "Conflict merging login-worker-2" "$SB" conflicts "$plans/login.json" --repo "$repo" --no-fetch
+expect "conflicts includes both workers' edits" 1 "login-worker-1 changed package.json" "$SB" conflicts "$plans/login.json" --repo "$repo" --no-fetch
 set_plan "$plans/prefixed.json" 'plan["workers"][0]["owns"] = ["src"]'
 expect "boundary explains an unpushed branch" 1 "branch fm/login is not on origin yet" "$SB" boundary "$plans/prefixed.json" login-worker-1 --repo "$repo"
 
