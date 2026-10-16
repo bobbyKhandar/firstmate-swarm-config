@@ -4,34 +4,58 @@ set -euo pipefail
 SWARM_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd -P)
 export FM_HOME="$SWARM_DIR/home"
 export FM_SWARM_CODE_ROOT="${FM_SWARM_CODE_ROOT:-$FM_HOME}"
+export FM_SWARM_DIR="$SWARM_DIR"
+APPROVAL_RECORD="$FM_HOME/state/.swarm-manager-approval"
+
+# The Herdr pane may not inherit this shell's environment, so the requested
+# approval mode is recorded in the home for the manager launch to read.
+record_approval_mode() {
+  local mode=${SWARM_MANAGER_APPROVAL:-auto}
+  case "$mode" in
+    auto | manual) ;;
+    *) printf 'SWARM_MANAGER_APPROVAL must be auto or manual, not %s\n' "$mode" >&2; return 2 ;;
+  esac
+  mkdir -p "$FM_HOME/state"
+  printf '%s\n' "$mode" > "$APPROVAL_RECORD"
+}
+
+manager_approval_mode() {
+  if [[ -n "${SWARM_MANAGER_APPROVAL:-}" ]]; then
+    record_approval_mode || return
+  fi
+  local mode=auto
+  [[ -f "$APPROVAL_RECORD" ]] && mode=$(<"$APPROVAL_RECORD")
+  case "$mode" in
+    auto | manual) printf '%s\n' "$mode" ;;
+    *) printf 'Unreadable approval mode in %s\n' "$APPROVAL_RECORD" >&2; return 2 ;;
+  esac
+}
 
 check_setup() {
-  for executable in herdr codex claude cursor-agent opencode quota-axi treehouse tasks-axi flock python; do
-    command -v "$executable" >/dev/null || { printf 'Missing command: %s\n' "$executable" >&2; return 1; }
+  local executable missing=()
+  for executable in herdr codex claude quota-axi treehouse tasks-axi flock python3 git gh gh-axi jq; do
+    command -v "$executable" >/dev/null || missing+=("$executable")
   done
-  test -x "$FM_SWARM_CODE_ROOT/bin/fm-spawn.sh"
-  python - "$FM_HOME" <<'PY'
-import json, sys
-from pathlib import Path
-home = Path(sys.argv[1])
-dispatch = json.loads((home / 'config/crew-dispatch.json').read_text())
-for profile in [dispatch['default'], *(rule['use'] for rule in dispatch['rules'])]:
-    for candidate in profile if isinstance(profile, list) else [profile]:
-        assert candidate['harness'] in {'codex', 'claude', 'cursor', 'opencode'}
-        assert candidate.get('effort', 'low') in {'low', 'medium', 'high', 'xhigh'}
-assert (home / 'config/backend').read_text().strip() == 'herdr'
-assert (home / 'data/captain.md').is_file()
-print('Configuration valid: high planning, medium management, GPT-6 Luna xhigh execution.')
-PY
+  if ((${#missing[@]})); then
+    printf 'Missing commands: %s\n' "${missing[*]}" >&2
+    return 1
+  fi
+  if [[ ! -x "$FM_SWARM_CODE_ROOT/bin/fm-spawn.sh" ]]; then
+    printf 'Firstmate is not installed in %s. Follow "Set up a fresh instance" in README.md.\n' "$FM_SWARM_CODE_ROOT" >&2
+    return 1
+  fi
+  python3 "$SWARM_DIR/bin/check-setup.py" "$SWARM_DIR" "$FM_HOME" "$FM_SWARM_CODE_ROOT"
 }
 
 case "${1:-}" in
   --connect-opencode)
+    python3 "$SWARM_DIR/bin/enable-opencode.py" --preflight
+    command -v opencode >/dev/null || { printf 'Missing command: opencode\n' >&2; exit 1; }
     opencode auth login --provider openai --method 'ChatGPT Pro/Plus (browser)' --pure
-    exec python "$SWARM_DIR/bin/enable-opencode.py"
+    exec python3 "$SWARM_DIR/bin/enable-opencode.py"
     ;;
   --finish-opencode)
-    exec python "$SWARM_DIR/bin/enable-opencode.py"
+    exec python3 "$SWARM_DIR/bin/enable-opencode.py"
     ;;
   --check)
     check_setup
@@ -49,16 +73,25 @@ case "${1:-}" in
       printf 'This swarm already has a manager. Select its pane in Herdr.\n' >&2
       exit 75
     fi
+    approval_mode=$(manager_approval_mode)
+    approval_flags=()
+    if [[ "$approval_mode" == auto ]]; then
+      approval_flags=(--approve-for-me)
+      printf 'Manager approvals: automatic review (--approve-for-me). Set SWARM_MANAGER_APPROVAL=manual to approve them yourself.\n' >&2
+    else
+      printf "Manager approvals: manual, using your Codex approval policy.\n" >&2
+    fi
     cd -- "$FM_SWARM_CODE_ROOT"
     exec codex --model gpt-6.1-sol \
       -c 'model_reasoning_effort="medium"' \
       -c 'features.multi_agent=false' \
       --add-dir "$FM_HOME" \
-      --approve-for-me \
+      "${approval_flags[@]}" \
       "$(cat "$SWARM_DIR/manager-start.md")"
     ;;
   "")
     check_setup
+    record_approval_mode
     if [[ "${HERDR_ENV:-}" == 1 ]]; then
       exec "$SWARM_DIR/swarm" --manager
     fi
