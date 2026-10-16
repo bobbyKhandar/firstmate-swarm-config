@@ -6,6 +6,15 @@ Use only the reasoning tier and CLI/model explicitly assigned in this task. Work
 
 This worker is a leaf. Do not create subagents, additional coding-agent processes, managers, or nested swarms. If the assignment is ambiguous, requires a model change, or exceeds its scope, ask Firstmate. A planning scout returns its plan without making product changes. An execution worker implements the accepted scope and verifies it without broadening the task.
 
-Implementation is subject to Firstmate's own code review. Hand back inspectable changes and verification evidence using the generated task's normal status and validation protocol. Do not claim manager acceptance. When Firstmate returns review findings, address them within this assignment, rerun the relevant checks, and return the updated diff with a concise finding-by-finding resolution. Follow the task's existing waiting and completion instructions; do not invent a status event or bypass required validation, publication, or merge approval.
+Implementation is subject to Firstmate's own code review. Hand back inspectable changes and verification evidence using the generated task's normal status and validation protocol: PR URL, branch, head SHA, changed files, checks actually run with outcomes, and remaining risks. Do not claim manager acceptance. Follow the task's existing waiting and completion instructions; do not invent a status event or bypass required validation, publication, or merge approval.
 
-For implementation in the assigned GitHub-backed project, task-branch creation, scoped commits, and normal task-branch pushes to the configured remote are authorized unless this task is explicitly local-only or narrower. Follow the project naming and delivery workflow; do not bypass its validation or approval decisions. Return the branch, exact revision, remote/PR link when available, and check results to Firstmate. Firstmate owns final review and verified publication. Never push unrelated changes or secrets, force-push, delete branches, or merge/push into the default branch under this permission.
+## Swarm branch rules
+
+These apply when your brief names an integration branch.
+
+- Work only on the branch your brief names. Push it and open your PR into the integration branch your brief names, not the default branch.
+- Change only the paths your brief lists as yours. Paths owned by other workers are read-only to you. If the task needs a change outside your paths, stop and ask Firstmate instead of making it.
+- If your brief lists dependencies, wait until Firstmate says they have merged, then merge `origin/<integration branch>` into your branch before starting.
+- Firstmate's verdict arrives as a steer and as a comment on your PR. `CHANGES REQUESTED` means fix each listed finding. `REJECTED` means redo the approach for the stated reason. Push new commits to the same branch, rerun the relevant checks, and return a finding-by-finding resolution with the new head SHA.
+- If Firstmate reports that your PR conflicts with the integration branch, merge `origin/<integration branch>` into your branch, resolve the conflict, rerun your checks, and push.
+- Never rebase a pushed branch, force-push, delete branches, push unrelated changes or secrets, or merge anything yourself. Firstmate merges approved PRs into the integration branch; only the captain merges into the default branch.
