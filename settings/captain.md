@@ -20,21 +20,21 @@ The captain wants the manager to direct a small swarm, review each worker's code
 At intake for implementation work in a GitHub-backed project, propose this contract in one short message and wait for the captain's go-ahead. A captain task message that already states it is the go-ahead.
 
 - Project, task name `<name>`, and integration branch `<prefix><name>`, which the manager creates from `<base>` (normally the default branch).
-- Workers `<name>-worker-1` to `<name>-worker-N` on branches `<prefix><name>-worker-N`, delivery mode `direct-PR`, each opening its PR into the integration branch. List each worker's owned paths and dependencies.
+- Workers `<name>-worker-1` to `<name>-worker-N` on fresh branches `<prefix><name>-worker-N`, delivery mode `direct-PR`, each opening its PR into the integration branch. The GitHub branch is the saved copy. A checkout on the PC is scratch and is not the result. List where each worker expects to work; those paths may overlap.
 - The manager posts a verdict comment on every worker PR and merges approved PRs one at a time into the integration branch through `bin/fm-pr-merge.sh`; yolo is on for these worker PRs only.
 - When every worker PR is merged, the manager opens one PR from the integration branch into `<base>` and reports it. Merging into `<base>` stays with the captain.
 
 `<prefix>` is the project's registered branch prefix unless the captain names another; an empty prefix gives exactly `<name>` and `<name>-worker-1`. Git cannot hold both `<name>` and `<name>/...`, which is why workers use `-worker-N`. Anything outside the approved contract, such as another worker, a different branch, a merge into `<base>`, or a force push, needs a new explicit instruction. If the captain declines, or the task must ship through `no-mistakes`, follow Firstmate's delivery path unchanged and add no manager review gate.
 
-## Planning and boundaries
+## Planning and branches
 
-Workers must never change the same code, whether the task has two workers or twenty. The helper is `$FM_SWARM_DIR/bin/swarm-branches`; run its `create-integration`, `boundary`, and `overlap` commands in the host context, like Firstmate's control scripts, because they reach GitHub.
+Workers may change the same file or function. The saved copy of each worker's code is its GitHub branch, not a directory on the PC. The CLI still needs a temporary worktree; that directory is scratch, and the worker is not done until the branch is pushed. The helper is `$FM_SWARM_DIR/bin/swarm-branches`; run its `create-integration`, `overlap`, and `conflicts` commands in the host context, like Firstmate's control scripts, because they reach GitHub. `conflicts` uses `git merge-tree` and does not check the project out.
 
-1. Create the plan with `swarm-branches init data/swarm/<name>.json --project OWNER/REPO --name <name> --workers N [--prefix P] [--base B]`. The planner proposes the split; the manager records each worker's `owns` (repository-relative files or directories; a directory covers everything under it) and `depends_on`.
-2. Every path a task changes belongs to exactly one worker. When several workers need one file, give it to one owner and make the others depend on that worker; a dependent worker starts after its dependency has merged and first merges `origin/<prefix><name>` into its branch.
-3. `swarm-branches check` must pass before dispatch. It rejects overlapping ownership and dependency cycles and prints the merge order.
+1. Create the plan with `swarm-branches init data/swarm/<name>.json --project OWNER/REPO --name <name> --workers N [--prefix P] [--base B]`. The planner proposes the split; the manager records each worker's `owns` (repository-relative files or directories it expects to edit; empty means any path) and `depends_on`. Shared paths are allowed.
+2. A dependent worker starts after its dependency has merged and first merges `origin/<prefix><name>` into its branch. Two workers with no dependency may edit the same code at the same time, each on its own branch.
+3. `swarm-branches check` must pass before dispatch. It rejects dependency cycles and prints the merge order and any shared paths.
 4. Run `swarm-branches create-integration`. Then scaffold each worker's brief and spawn it as `<name>-worker-N` with `--mode direct-PR --yolo on --branch-prefix <prefix>` and its dispatch profile, passing the same mode and prefix to `bin/fm-brief.sh` and `bin/fm-spawn.sh`; the spawn refuses a brief that records different values.
-5. Each worker's brief states its branch, PR base, owned paths, the other workers' paths as read-only, its dependencies, the objective, acceptance criteria, and checks.
+5. Each worker's brief states its branch, PR base, the paths it expects to edit, its dependencies, the objective, acceptance criteria, and checks. It also says that another worker may edit the same code and that the GitHub branch is the saved copy.
 
 ## Review loop for each worker PR
 
@@ -54,7 +54,7 @@ An additional independent reviewer may assist when justified by the change or ex
 ## Staged merges
 
 1. Merge approved PRs one at a time in the order `swarm-branches check` prints, each with `bin/fm-pr-merge.sh <worker> <pr-url>`. It refuses unless the PR is open, mergeable, conflict-free, and green at its exact head, so confirm that head is the approved SHA first.
-2. After each merge, run `swarm-branches overlap` and re-read the remaining PRs. When one now conflicts, steer its worker to merge `origin/<prefix><name>` into its branch, resolve the conflict, rerun its checks, and push. Workers never rebase a pushed branch or force-push. Review the new head before approving again.
+2. After each merge, run `swarm-branches conflicts`. When it reports a conflict, do not ask one worker to guess the other's intent. Dispatch the conflict helper with that command's output. The helper is Codex gpt-6.1-sol at high reasoning. It reads every worker's version of each conflicted region, keeps each intended behavior, pushes a fresh branch `<prefix><name>-resolve-N`, and opens a PR into the integration branch. Review that PR the same way as a worker PR. If the resolution is rejected, relaunch the helper at gpt-6.1-sol xhigh. If that attempt is also inadequate, stop and report to the captain. Workers never rebase a pushed branch or force-push.
 3. When every worker PR is merged and the integration branch's checks pass, open one PR from the integration branch into `<base>` with gh-axi. Report its full URL to the captain with the merged worker PRs, approved SHAs, and verification. Do not merge it.
 4. Record the contract, plan file, each PR's verdict history and approved SHA, the merge order, and the final PR URL in the task's durable notes.
 
@@ -62,7 +62,7 @@ Never force-push, delete branches, rewrite published history, push secrets, chan
 
 ## Size and cost
 
-There is no fixed worker-count cap. The planner recommends task decomposition, dependencies, and useful parallel work; the manager chooses and adjusts active concurrency. Base the choice on independent ready tasks, overlapping files or components, current account quotas, machine resources, and the manager's capacity to supervise and personally review the results. Include planning and extra review workers in that assessment. Add workers when parallelism improves delivery; queue dependent or conflicting work and reduce concurrency when quota, resource, or review pressure makes it unhelpful. Briefly record the chosen concurrency and rationale in the task plan, and reassess as work changes. Keep one writer per isolated copy. Do not create secondmates or nested workers for this setup. This is an instruction policy, not an operating-system concurrency limiter.
+There is no fixed worker-count cap. The planner recommends task decomposition, dependencies, and useful parallel work; the manager chooses and adjusts active concurrency. Workers may edit the same file on separate GitHub branches. Base the choice on independent ready tasks, current account quotas, machine resources, and the manager's capacity to supervise and personally review the results, including conflict-helper runs. Include planning and extra review workers in that assessment. Add workers when parallelism improves delivery and reduce concurrency when quota, resource, or review pressure makes it unhelpful. Briefly record the chosen concurrency and rationale in the task plan, and reassess as work changes. Do not create secondmates or nested workers for this setup. This is an instruction policy, not an operating-system concurrency limiter.
 
 Delegate genuinely independent work in parallel. Prefer one writer per isolated copy and short summaries between roles. Capture quota-axi's default TOON at each profile-array intake and follow the existing quota-array-dispatch contract. Model and effort are separate choices; the requested extra-high effort does not establish a price or quota guarantee. Preserve the requested reasoning class when choosing among available accounts. If no suitable route is usable, report it rather than adding paid API access or silently changing the tier.
 
