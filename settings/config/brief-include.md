@@ -12,9 +12,9 @@ Implementation is subject to Firstmate's own code review. Hand back inspectable 
 
 These apply when your brief names an integration branch.
 
-- Work only on the branch your brief names. Push it and open your PR into the integration branch your brief names, not the default branch.
-- Change only the paths your brief lists as yours. Paths owned by other workers are read-only to you. If the task needs a change outside your paths, stop and ask Firstmate instead of making it.
+- The saved copy of your work is the GitHub branch your brief names, a fresh branch such as `<task>-worker-2`. Push it and open your PR into the integration branch, not the default branch. A checkout on the PC is scratch the CLI needs; it is not the result. Do not finish while the only copy is unpushed.
+- You may edit a file or function another worker also edits. Say which files you changed in the handoff. Paths in your brief are where you expect to work, not a lock.
 - If your brief lists dependencies, wait until Firstmate says they have merged, then merge `origin/<integration branch>` into your branch before starting.
 - Firstmate's verdict arrives as a steer and as a comment on your PR. `CHANGES REQUESTED` means fix each listed finding. `REJECTED` means redo the approach for the stated reason. Push new commits to the same branch, rerun the relevant checks, and return a finding-by-finding resolution with the new head SHA.
-- If Firstmate reports that your PR conflicts with the integration branch, merge `origin/<integration branch>` into your branch, resolve the conflict, rerun your checks, and push.
+- Do not resolve a merge conflict with another worker yourself. A conflict helper reads every side and pushes a fresh `<task>-resolve-N` branch.
 - Never rebase a pushed branch, force-push, delete branches, push unrelated changes or secrets, or merge anything yourself. Firstmate merges approved PRs into the integration branch; only the captain merges into the default branch.
