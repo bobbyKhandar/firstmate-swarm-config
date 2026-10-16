@@ -22,7 +22,7 @@
     "settings/config/startup-memory-budget": "0d5f5787265adcabadcbe5607a8f7c8d13c872e066e8b127e7d699437caeecf7",
     "settings/config/supervision-host-off": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
     "swarm": "09cc96e6a01ea60ba4f3df70ade66b43a1c168605423849d6f1a67650df6e3e7",
-    "tests/run.sh": "a202390495b9c29c31e165b3579b595a5651ddc5a40318e24edcd05cb2dc9a38",
+    "tests/run.sh": "3a5527fab4b0f17d237bd5271165e5ca875d67fbe3073672bca746602454d75a",
     "tests/upstream-dispatch.sh": "21673b07d87925e36540938b38ae731593dd7d1eeab078f1a11a3c3f6b743f21"
   }
 }
