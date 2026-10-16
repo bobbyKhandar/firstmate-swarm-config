@@ -2,7 +2,7 @@
 
 A reusable settings preset for [Firstmate](https://github.com/kunchenguid/firstmate), using Herdr as the workspace and native coding CLIs as workers.
 
-**High reasoning plans → a medium-reasoning manager splits the task into workers with exclusive file ownership → each GPT-6 Luna extra-high worker pushes its own branch and opens a PR → the manager approves, requests changes, or rejects on the PR → approved PRs merge one at a time into the task's integration branch → you merge that branch into `main` if you want it.**
+**High reasoning plans → a medium-reasoning manager opens fresh GitHub branches `name-worker-N` → workers may edit the same file, and the branch is the saved copy → the manager approves, requests changes, or rejects each PR → a conflict helper reads every side and resolves merge conflicts → you merge the integration branch into `main` if you want it.**
 
 This repository contains configuration and small launch helpers. Firstmate itself is downloaded separately from upstream and lives in an ignored `home/` directory. It is not vendored here.
 
@@ -16,24 +16,23 @@ Herdr provides the visible workspace. The manager is a Codex session following F
 flowchart TD
     U["You: project + desired outcome"] --> M["Manager understands the task"]
     M --> P{"Needs planning?"}
-    P -- Yes --> H["High-reasoning planner<br/>Split, owned paths, dependencies, acceptance criteria"]
+    P -- Yes --> H["High-reasoning planner<br/>Split, shared paths allowed, dependencies, acceptance criteria"]
     H --> K
     P -- Clear existing plan --> K
 
-    K["Manager proposes the swarm contract<br/>Integration branch name, workers name-worker-N, owned paths"]
+    K["Manager proposes the swarm contract<br/>Integration branch name, fresh branches name-worker-N"]
     K --> OK{"You approve this task?"}
     OK -- No --> STD["Normal Firstmate delivery<br/>No extra review gate"]
     OK -- Yes --> I["Manager creates branch name from main"]
 
-    I --> W["GPT-6 Luna workers, extra-high reasoning<br/>Each on name-worker-N, only its own paths<br/>Implement, run checks, push, open PR into name"]
-    W --> B["Boundary check<br/>Changes outside the worker's paths are findings"]
-    B --> R["Manager reviews the actual diff"]
+    I --> W["GPT-6 Luna workers, extra-high reasoning<br/>Each pushes name-worker-N, even on the same file<br/>The GitHub branch is the saved copy"]
+    W --> R["Manager reviews the actual diff"]
     R --> Q{"Verdict comment on the PR"}
     Q -- "CHANGES REQUESTED or REJECTED, with reasons" --> W
     Q -- "APPROVED at head SHA" --> MG["Merge that PR into name<br/>One at a time, green and conflict-free"]
-    MG --> X{"Other open PRs now conflict?"}
-    X -- Yes --> SYNC["Owning worker merges name into its branch<br/>Manager reviews again"]
-    SYNC --> R
+    MG --> X{"Does the next merge conflict?"}
+    X -- Yes --> HLP["Conflict helper, gpt-6.1-sol high<br/>Reads every side, pushes name-resolve-N"]
+    HLP --> R
     X -- No --> N{"All workers merged?"}
     N -- No --> R
     N -- Yes --> FPR["Manager opens PR name into main<br/>Reports it to you"]
@@ -42,7 +41,7 @@ flowchart TD
     Y -- Yes --> MERGE["You merge"]
 ```
 
-A task is not a two-worker unit. The manager numbers workers `name-worker-1` through `name-worker-N`, and N is however many independent pieces the plan has. The planner recommends that split; the manager adjusts how many of those workers run at once based on dependencies, quota, machine resources, and review capacity. There is no fixed worker cap. Any code change after an approval needs a new review.
+A task is not a two-worker unit. The manager numbers workers `name-worker-1` through `name-worker-N`, and N is however many pieces the plan has. Workers may edit the same file or function; each one's saved copy is its own GitHub branch, not a directory on the PC. The CLI still uses a temporary checkout, and that checkout is scratch. There is no fixed worker cap. Any code change after an approval needs a new review.
 
 ## What it configures
 
@@ -52,30 +51,31 @@ A task is not a two-worker unit. The manager numbers workers `name-worker-1` thr
 | Manager | Codex `gpt-6.1-sol` medium | Propose the per-task swarm contract, assign workers and their paths, review every worker PR, post verdicts, merge approved PRs into the integration branch, and open the final PR into `main`. |
 | Workers | Codex `gpt-6-luna`, **extra-high** (`xhigh`) | Implement small, clear tasks and run relevant checks. |
 | Extra review | Claude `sonnet` medium; Codex `gpt-6-luna` medium | An additional reviewer when you ask for one or the change justifies it; the manager's own review still applies. |
+| Conflict helper | Codex `gpt-6.1-sol` **high**, then **extra-high** if rejected | Reads every side of a merge conflict and pushes a fresh `<name>-resolve-N` branch. |
 | Escalation | Codex `gpt-6.1-sol` **high**, then `gpt-6.1-sol` **extra-high** | When the manager rejects a worker's attempt, or the same finding survives two rounds of requested changes, the task is relaunched one step up, keeping its branch and PR. After the extra-high attempt, the manager reports to you instead of retrying. |
 
 Model identifiers are a snapshot of the original setup, not a guarantee of availability for your account. Edit `settings/config/crew-dispatch.json` and the manager model in `swarm` for models your CLI supports; keep `settings/captain.md` and `manager-start.md` consistent with those choices. Reasoning effort and model cost are separate choices. The execution default is GPT-6 Luna xhigh for routine work too; quota pressure must not silently change the model or effort. This preset does not make a pricing or quota guarantee.
 
-- No fixed worker-count cap: the planner recommends the task split; the manager chooses concurrency based on dependencies, conflicting edits, current quota, machine resources, and supervision/review capacity. Planning and extra review workers count toward this assessment. The manager records the rationale in the task plan and adjusts concurrency as work changes.
+- No fixed worker-count cap: the planner recommends the task split; the manager chooses concurrency based on dependencies, current quota, machine resources, and supervision/review capacity. Workers may edit the same file on separate branches. Planning, conflict-helper, and extra review runs count toward this assessment. The manager records the rationale in the task plan and adjusts concurrency as work changes.
 - One manager; no nested swarms or native Codex subagents.
 - Worker reports must identify the changes and checks actually run.
 - The manager reads the actual diff, posts its verdict on the PR, sends findings to the worker, and reviews every updated head before approving.
 - Project validation applies, and merging into `main` stays with you.
 
-Concurrency, ownership, and the review loop are agent instructions backed by `bin/swarm-branches` checks and Firstmate's merge guards, not by repository permissions. A full swarm task has not yet been run end to end; see the checklist under Verification.
+The review loop and conflict helper are agent instructions backed by `bin/swarm-branches` checks and Firstmate's merge guards, not by repository permissions. A full swarm task has not yet been run end to end; see the checklist under Verification.
 
 ## Branches, review, and merging
 
 Firstmate only lets a current, explicit, concrete instruction from you relax its standing rules, so the manager's authority is granted per task. At intake it proposes a contract like this and waits for your go-ahead (a task message that already says this counts):
 
-> Task `login` in `acme/app`: I create `login` from `main` and use as many workers as the split needs. This one has three: `login-worker-1` (owns `src/auth/`), `login-worker-2` (owns `src/ui/`), and `login-worker-3` (owns `src/api/`, after worker 1). Each pushes its own branch and opens a PR into `login`. I comment APPROVED, CHANGES REQUESTED, or REJECTED on each PR, merge approved PRs into `login` one at a time, then open a PR from `login` into `main` for you.
+> Task `login` in `acme/app`: I create `login` from `main` and use as many workers as the split needs. This one has three fresh branches: `login-worker-1`, `login-worker-2`, and `login-worker-3`. They may edit the same file. Each pushes only its own branch and opens a PR into `login`. I comment APPROVED, CHANGES REQUESTED, or REJECTED on each PR. If a merge conflicts, a conflict helper reads every side and pushes `login-resolve-1`. I then open a PR from `login` into `main` for you.
 
-How workers stay out of each other's way:
+How the same file can be edited twice:
 
-- **Exclusive ownership.** Each worker owns a set of files or directories, recorded in the plan file (`home/data/swarm/<name>.json`). Every path has one owner, no matter how many workers the task has. A file several workers need goes to one owner, and the others depend on that worker and start after it merges.
-- **Known boundaries.** Each worker's brief lists its own paths, the other workers' paths as read-only, its PR base, and its dependencies. A worker that needs a change outside its paths asks the manager instead of making it.
-- **Mechanical checks.** `bin/swarm-branches check` rejects overlapping ownership and dependency cycles and prints the merge order. `boundary` flags any changed file outside a worker's paths, including files moved out of another worker's area. `overlap` lists files touched by more than one open worker branch.
-- **One merge at a time.** Merges go through Firstmate's `bin/fm-pr-merge.sh`, which refuses unless the PR is mergeable, conflict-free, and green at its exact head. After each merge, a PR that now conflicts goes back to its worker, who merges the integration branch into its own branch (never a rebase or force-push), and the manager reviews it again.
+- **The branch is the saved copy.** Each worker's result is the GitHub branch `<name>-worker-N`, created fresh from the integration branch. The PC checkout is scratch the coding CLI needs. A worker is not done until that branch is pushed.
+- **Shared edits are allowed.** `owns` in the plan file records where a worker expects to work. It may be empty, and two workers may list the same path. `bin/swarm-branches check` rejects dependency cycles and prints shared paths; it does not reject them.
+- **Conflicts are a separate task.** `bin/swarm-branches conflicts` tries the merges with `git merge-tree` (no checkout) and prints every worker's edit of each conflicted file. The conflict helper is Codex `gpt-6.1-sol` at high reasoning. It keeps each intended behavior, pushes a fresh `<name>-resolve-N` branch, and opens a PR into the integration branch. The manager reviews that PR and does not edit it. A rejected resolution is relaunched at `gpt-6.1-sol` extra-high.
+- **One merge at a time.** Clean merges go through Firstmate's `bin/fm-pr-merge.sh`, which refuses unless the PR is mergeable, conflict-free, and green at its exact head. Workers do not resolve each other's conflicts, rebase a pushed branch, or force-push.
 
 All agents share your GitHub login, and GitHub does not let an account approve or request changes on its own pull request, so verdicts are PR comments (`Manager review: APPROVED at <sha>`) rather than formal reviews. For the same reason GitHub cannot tell the agents' merges from yours: a branch rule on `main` that requires a pull request stops direct pushes, but only a separate GitHub account for the swarm, plus a rule requiring your approval on `main`, enforces that only you merge into it.
 
@@ -165,7 +165,7 @@ Cursor is excluded from automatic routing by default. Add a route only after ver
 | `bin/enable-opencode.py` | Optional OAuth check and live probe before enabling OpenCode. |
 | `manifest.json` | Source version and hashes of distributed files. |
 | `bin/manifest.py` | Checks `manifest.json` against the tracked files, or regenerates it. |
-| `bin/swarm-branches` | Creates and checks a task's plan file, checks worker boundaries and overlap, and creates the integration branch. |
+| `bin/swarm-branches` | Creates the plan and integration branch, allows shared paths, and prints every side of a merge conflict. |
 | `bin/check-setup.py` | The configuration, pin, and route checks behind `./swarm --check`. |
 | `tests/run.sh` | Fixture tests with stub CLIs; set `UPSTREAM_BOOTSTRAP` to a pinned `bin/fm-bootstrap.sh` to also run Firstmate's own dispatch validator. |
 | `.github/workflows/ci.yml` | Runs ShellCheck, the Python compile check, the manifest check, and the fixture tests on every push. |
@@ -187,7 +187,7 @@ Before relying on the swarm workflow, run one small task that uses several worke
 3. The integration branch appears on GitHub, created from `main`.
 4. Each worker pushes `<name>-worker-N` and opens its PR into the integration branch, not `main`.
 5. The manager posts a `Manager review:` verdict on each PR; a `CHANGES REQUESTED` round produces new commits and a new review.
-6. Approved PRs merge one at a time into the integration branch, and a deliberately conflicting PR is sent back to its worker.
+6. Approved PRs merge one at a time into the integration branch. A conflicting merge is given to the conflict helper, which pushes `<name>-resolve-N` after reading every side.
 7. The manager opens a PR from the integration branch into `main`, reports it, and does not merge it.
 8. Nothing was force-pushed, and nothing landed on `main` without you.
 
