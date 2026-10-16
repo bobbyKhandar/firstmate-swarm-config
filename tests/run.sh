@@ -186,6 +186,7 @@ check "planning and escalation rules are untouched" '! grep -E "^(The task is a 
 
 echo "# swarm-branches"
 SB="$ROOT/bin/swarm-branches"
+chmod +x "$SB"
 plans="$WORK/plans"
 mkdir -p "$plans"
 expect "init names the integration and worker branches" 0 "integration login, workers login-worker-1, login-worker-2" \
@@ -252,7 +253,7 @@ echo "# manifest and dispatch"
 expect "manifest matches the tracked files" 0 "Manifest matches" python3 "$ROOT/bin/manifest.py" check
 if [[ -n "${UPSTREAM_BOOTSTRAP:-}" ]]; then
   expect "Firstmate's own validator accepts the dispatch file" 0 "valid" \
-    "$ROOT/tests/upstream-dispatch.sh" "$UPSTREAM_BOOTSTRAP" "$ROOT/settings/config/crew-dispatch.json"
+    bash "$ROOT/tests/upstream-dispatch.sh" "$UPSTREAM_BOOTSTRAP" "$ROOT/settings/config/crew-dispatch.json"
 else
   echo "skip Firstmate validator (set UPSTREAM_BOOTSTRAP to a pinned bin/fm-bootstrap.sh)"
 fi
